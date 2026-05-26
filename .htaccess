@@ -1,5 +1,10 @@
 RewriteEngine On
 
+# Shared-hosting fallback when the document root points at the project root
+# instead of the public/ directory.
+RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+RewriteRule ^uploads/(.*)$ public/uploads/$1 [L]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ public/index.php [L,QSA]
