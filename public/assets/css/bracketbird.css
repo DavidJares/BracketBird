@@ -1160,6 +1160,114 @@ code {
     font-weight: 650;
 }
 
+.bb-export-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    width: 100%;
+}
+
+.bb-export-helper,
+.bb-export-card {
+    position: relative;
+    overflow: hidden;
+    padding: 1rem;
+    border: 1px solid rgba(88, 66, 55, 0.74);
+    border-radius: var(--bb-radius);
+    background: var(--bb-surface);
+    color: var(--bb-text);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+}
+
+.bb-export-helper::before,
+.bb-export-card::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: rgba(249, 115, 22, 0.72);
+    content: "";
+}
+
+.bb-export-helper {
+    width: 100%;
+    background:
+        linear-gradient(135deg, rgba(249, 115, 22, 0.11), transparent 52%),
+        var(--bb-surface);
+}
+
+.bb-export-helper p {
+    margin: 0.25rem 0 0;
+    color: var(--bb-muted);
+    font-weight: 700;
+}
+
+.bb-export-card {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 1rem;
+    min-height: 230px;
+    align-self: stretch;
+}
+
+.bb-export-card-copy h3 {
+    margin: 0.12rem 0 0;
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 850;
+}
+
+.bb-export-card-copy p,
+.bb-export-helper p {
+    margin: 0.5rem 0 0;
+    color: var(--bb-muted);
+    font-weight: 650;
+}
+
+.bb-export-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: start;
+    gap: 0.45rem;
+}
+
+.bb-export-badges span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.8rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid rgba(249, 115, 22, 0.32);
+    border-radius: 999px;
+    background: rgba(249, 115, 22, 0.11);
+    color: var(--bb-primary-soft);
+    font-size: 0.76rem;
+    font-weight: 850;
+}
+
+.bb-export-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    align-self: end;
+}
+
+.bb-export-card-footer .btn {
+    min-width: 6.5rem;
+}
+
+@media (max-width: 767.98px) {
+    .bb-export-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .bb-export-card {
+        min-height: 0;
+    }
+
+    .bb-export-card-footer .btn {
+        width: 100%;
+    }
+}
+
 .bb-stack-form {
     display: grid;
     gap: 0.85rem;
@@ -4250,6 +4358,7 @@ code {
 .bb-theme-light .bb-metric-card strong,
 .bb-theme-light .bb-group-card-header h3,
 .bb-theme-light .bb-board-section-heading h3,
+.bb-theme-light .bb-export-card-copy h3,
 .bb-theme-light .bb-stage-action-copy h3,
 .bb-theme-light .bb-match-side strong,
 .bb-theme-light .bb-match-score-center strong,
@@ -4304,7 +4413,9 @@ code {
 .bb-theme-light .bb-public-result-item,
 .bb-theme-light .bb-public-bracket-card,
 .bb-theme-light .bb-public-qr,
-.bb-theme-light .bb-public-mobile-qr {
+.bb-theme-light .bb-public-mobile-qr,
+.bb-theme-light .bb-export-card,
+.bb-theme-light .bb-export-helper {
     border-color: var(--bb-border);
     background: var(--bb-surface);
 }

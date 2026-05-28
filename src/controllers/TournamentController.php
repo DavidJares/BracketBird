@@ -14,7 +14,7 @@ use Throwable;
 final class TournamentController extends BaseController
 {
     private const MATCH_MODES = ['fixed_2_sets', 'best_of_3'];
-    private const ADMIN_SECTIONS = ['tournament', 'groups', 'matches', 'knockout', 'public_view', 'teams'];
+    private const ADMIN_SECTIONS = ['tournament', 'groups', 'matches', 'knockout', 'public_view', 'teams', 'exports'];
     private const PUBLIC_SCREEN_DEFINITIONS = [
         'overview' => ['label' => 'Overview', 'path' => '/overview'],
         'next_matches' => ['label' => 'Current / Next Matches', 'path' => '/next'],
@@ -533,6 +533,421 @@ final class TournamentController extends BaseController
         $this->handleSaveKnockoutMatchScore($tournament, $matchId, $redirectPath, $successRedirectPath);
     }
 
+    public function printSchedule(): void
+    {
+        $this->renderPrintForSuperadmin('schedule');
+    }
+
+    public function printScheduleByCourt(): void
+    {
+        $this->renderPrintForSuperadmin('schedule_by_court');
+    }
+
+    public function printScheduleByGroup(): void
+    {
+        $this->renderPrintForSuperadmin('schedule_by_group');
+    }
+
+    public function printGroupMatrix(): void
+    {
+        $this->renderPrintForSuperadmin('group_matrix');
+    }
+
+    public function printKnockout(): void
+    {
+        $this->renderPrintForSuperadmin('knockout');
+    }
+
+    public function printScheduleBySlug(): void
+    {
+        $this->renderPrintForSlug('schedule');
+    }
+
+    public function printScheduleByCourtBySlug(): void
+    {
+        $this->renderPrintForSlug('schedule_by_court');
+    }
+
+    public function printScheduleByGroupBySlug(): void
+    {
+        $this->renderPrintForSlug('schedule_by_group');
+    }
+
+    public function printGroupMatrixBySlug(): void
+    {
+        $this->renderPrintForSlug('group_matrix');
+    }
+
+    public function printKnockoutBySlug(): void
+    {
+        $this->renderPrintForSlug('knockout');
+    }
+
+    private function renderPrintForSuperadmin(string $printType): void
+    {
+        $this->requireSuperadminAuth();
+        $tournament = $this->resolveTournamentByQueryForSuperadmin();
+        if ($tournament === null) {
+            return;
+        }
+
+        $this->renderTournamentPrint($tournament, false, $printType);
+    }
+
+    private function renderPrintForSlug(string $printType): void
+    {
+        $tournament = $this->resolveTournamentBySlugWithAdminAccess();
+        if ($tournament === null) {
+            return;
+        }
+
+        $this->renderTournamentPrint($tournament, true, $printType);
+    }
+
+    /**
+     * @param array<string, mixed> $tournament
+     */
+    private function renderTournamentPrint(array $tournament, bool $isSlugContext, string $printType): void
+    {
+        $allowedPrintTypes = ['schedule', 'schedule_by_court', 'schedule_by_group', 'group_matrix', 'knockout'];
+        if (!in_array($printType, $allowedPrintTypes, true)) {
+            http_response_code(404);
+            header('Content-Type: text/html; charset=utf-8');
+            echo '404 Not Found';
+            return;
+        }
+
+        $tournamentId = (int) ($tournament['id'] ?? 0);
+        $tournamentSlug = (string) ($tournament['slug'] ?? '');
+        $prefill = (string) ($_GET['prefill'] ?? '0') === '1';
+
+        $tournamentModel = new TournamentModel($this->db());
+        $teamModel = new TeamModel($this->db());
+        $matchModel = new MatchModel($this->db());
+
+        $groups = $tournamentModel->groupsForTournament($tournamentId);
+        $teams = $teamModel->allByTournament($tournamentId);
+        $groupAssignment = $this->buildGroupAssignmentViewData($groups, $teams);
+        $groupMatches = $this->sortGroupMatchesForPrint($matchModel->groupMatchesForTournament($tournamentId));
+        $knockoutMatches = $matchModel->knockoutMatchesForTournament($tournamentId);
+        $allMatches = $this->buildPrintMatchList($groupMatches, $knockoutMatches);
+        $finishedMatchIds = array_values(array_filter(
+            array_map(
+                static fn (array $match): int => (string) ($match['status'] ?? '') === 'finished' ? (int) ($match['id'] ?? 0) : 0,
+                $allMatches
+            ),
+            static fn (int $id): bool => $id > 0
+        ));
+        $setsByMatchId = $matchModel->setsForMatches($finishedMatchIds);
+        $finishedGroupMatches = $matchModel->finishedGroupMatchesForTournament($tournamentId);
+        $groupStandingsByGroup = $prefill
+            ? $this->buildGroupStandings(
+                $groups,
+                $teams,
+                $finishedGroupMatches,
+                $setsByMatchId,
+                (string) ($tournament['group_stage_mode'] ?? ($tournament['match_mode'] ?? ''))
+            )
+            : [];
+        $knockoutPrint = $this->buildKnockoutPrintData($knockoutMatches);
+
+        $baseAdminPath = $isSlugContext ? '/tournament/' . $tournamentSlug . '/admin' : '/admin/tournament';
+        $idSuffix = $isSlugContext ? '' : '?id=' . $tournamentId;
+        $exportsUrl = $this->url($baseAdminPath . '/exports' . $idSuffix);
+        $printPaths = [
+            'schedule' => $baseAdminPath . '/print/schedule',
+            'schedule_by_court' => $baseAdminPath . '/print/schedule-by-court',
+            'schedule_by_group' => $baseAdminPath . '/print/schedule-by-group',
+            'group_matrix' => $baseAdminPath . '/print/group-matrix',
+            'knockout' => $baseAdminPath . '/print/knockout',
+        ];
+        $printUrls = [];
+        foreach ($printPaths as $key => $path) {
+            $params = ['prefill' => $prefill ? 1 : 0];
+            if (!$isSlugContext) {
+                $params = ['id' => $tournamentId] + $params;
+            }
+            $printUrls[$key] = $this->url($path . '?' . http_build_query($params));
+        }
+
+        $toggleParams = ['prefill' => $prefill ? 0 : 1];
+        if (!$isSlugContext) {
+            $toggleParams = ['id' => $tournamentId] + $toggleParams;
+        }
+        $prefillToggleUrl = $this->url($printPaths[$printType] . '?' . http_build_query($toggleParams));
+
+        $outputMeta = $this->printOutputMeta($printType);
+        $publicUrl = $this->absoluteUrl('/public/' . $tournamentSlug . '/overview');
+        $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&margin=1&data=' . rawurlencode($publicUrl);
+        $printedAt = (new DateTimeImmutable('now', $this->appTimezone()))->format('Y-m-d H:i');
+        $pageOrientation = $printType === 'group_matrix' || $printType === 'knockout' ? 'landscape' : 'portrait';
+
+        $this->renderPrintView('admin/print/' . $printType, [
+            'title' => (string) ($tournament['name'] ?? 'Tournament') . ' - ' . $outputMeta['title'],
+            'printOutputTitle' => $outputMeta['title'],
+            'pageOrientation' => $pageOrientation,
+            'tournament' => $tournament,
+            'groups' => $groups,
+            'teams' => $teams,
+            'groupAssignment' => $groupAssignment,
+            'groupMatches' => $groupMatches,
+            'knockoutMatches' => $knockoutMatches,
+            'allMatches' => $allMatches,
+            'setsByMatchId' => $setsByMatchId,
+            'groupStandingsByGroup' => $groupStandingsByGroup,
+            'knockoutPrint' => $knockoutPrint,
+            'prefill' => $prefill,
+            'exportsUrl' => $exportsUrl,
+            'printUrls' => $printUrls,
+            'prefillToggleUrl' => $prefillToggleUrl,
+            'publicUrl' => $publicUrl,
+            'qrUrl' => $qrUrl,
+            'printedAt' => $printedAt,
+        ]);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $groupMatches
+     * @param list<array<string, mixed>> $knockoutMatches
+     * @return list<array<string, mixed>>
+     */
+    private function buildPrintMatchList(array $groupMatches, array $knockoutMatches): array
+    {
+        $matches = [];
+        foreach ($groupMatches as $match) {
+            $match['stage'] = 'group';
+            $match['stage_label'] = 'Group Stage';
+            $match['context_label'] = 'Group ' . (string) ($match['group_name'] ?? '-');
+            $matches[] = $match;
+        }
+        foreach ($knockoutMatches as $match) {
+            $roundName = trim((string) ($match['round_name'] ?? ''));
+            $match['stage'] = 'knockout';
+            $match['stage_label'] = 'Knockout';
+            $match['context_label'] = $roundName !== '' ? $roundName : 'Round';
+            $match['schedule_order'] = (int) ($match['bracket_position'] ?? 0);
+            $matches[] = $match;
+        }
+
+        usort($matches, static function (array $a, array $b): int {
+            $timeA = trim((string) ($a['planned_start'] ?? ''));
+            $timeB = trim((string) ($b['planned_start'] ?? ''));
+            $timeCompare = ($timeA === '' ? '9999-12-31 23:59:59' : $timeA) <=> ($timeB === '' ? '9999-12-31 23:59:59' : $timeB);
+            if ($timeCompare !== 0) {
+                return $timeCompare;
+            }
+
+            $courtCompare = (int) ($a['court_number'] ?? 0) <=> (int) ($b['court_number'] ?? 0);
+            if ($courtCompare !== 0) {
+                return $courtCompare;
+            }
+
+            $orderCompare = (int) ($a['schedule_order'] ?? 0) <=> (int) ($b['schedule_order'] ?? 0);
+            if ($orderCompare !== 0) {
+                return $orderCompare;
+            }
+
+            return strcmp((string) ($a['context_label'] ?? ''), (string) ($b['context_label'] ?? ''));
+        });
+
+        return $matches;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $groupMatches
+     * @return list<array<string, mixed>>
+     */
+    private function sortGroupMatchesForPrint(array $groupMatches): array
+    {
+        usort($groupMatches, static function (array $a, array $b): int {
+            $timeA = trim((string) ($a['planned_start'] ?? ''));
+            $timeB = trim((string) ($b['planned_start'] ?? ''));
+            $timeCompare = ($timeA === '' ? '9999-12-31 23:59:59' : $timeA) <=> ($timeB === '' ? '9999-12-31 23:59:59' : $timeB);
+            if ($timeCompare !== 0) {
+                return $timeCompare;
+            }
+
+            $courtCompare = (int) ($a['court_number'] ?? 0) <=> (int) ($b['court_number'] ?? 0);
+            if ($courtCompare !== 0) {
+                return $courtCompare;
+            }
+
+            return (int) ($a['schedule_order'] ?? 0) <=> (int) ($b['schedule_order'] ?? 0);
+        });
+
+        return $groupMatches;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $knockoutMatches
+     * @return array{
+     *     rounds: array<string, list<array<string, mixed>>>,
+     *     source_labels: array<string, string>,
+     *     final: array<string, mixed>|null,
+     *     left_rounds: list<array{name: string, matches: list<array<string, mixed>>}>,
+     *     right_rounds: list<array{name: string, matches: list<array<string, mixed>>}>,
+     *     semifinal_labels: list<string>,
+     *     note: string
+     * }
+     */
+    private function buildKnockoutPrintData(array $knockoutMatches): array
+    {
+        $rounds = [];
+        $sourceLabels = [];
+        $roundIndex = 0;
+        $currentRoundName = '';
+        $matchNumberInRound = 0;
+
+        foreach ($knockoutMatches as $match) {
+            $roundName = trim((string) ($match['round_name'] ?? ''));
+            if ($roundName === '') {
+                $roundName = 'Round';
+            }
+            if ($roundName !== $currentRoundName) {
+                $currentRoundName = $roundName;
+                $roundIndex++;
+                $matchNumberInRound = 0;
+            }
+
+            $matchNumberInRound++;
+            $humanRoundName = $this->humanKnockoutRoundLabel($roundName);
+            $match['print_round_name'] = $humanRoundName;
+            $match['print_match_label'] = strcasecmp($humanRoundName, 'Final') === 0
+                ? 'Final'
+                : $humanRoundName . ' ' . $matchNumberInRound;
+            $sourceLabels['winner:r' . $roundIndex . ':m' . $matchNumberInRound] = (string) $match['print_match_label'];
+
+            if (!isset($rounds[$humanRoundName])) {
+                $rounds[$humanRoundName] = [];
+            }
+            $rounds[$humanRoundName][] = $match;
+        }
+
+        foreach ($rounds as &$roundMatches) {
+            usort(
+                $roundMatches,
+                static function (array $a, array $b): int {
+                    $positionCompare = (int) ($a['bracket_position'] ?? 0) <=> (int) ($b['bracket_position'] ?? 0);
+                    if ($positionCompare !== 0) {
+                        return $positionCompare;
+                    }
+
+                    return (int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0);
+                }
+            );
+        }
+        unset($roundMatches);
+
+        $final = null;
+        foreach ($rounds['Final'] ?? [] as $match) {
+            $final = $match;
+            break;
+        }
+
+        $leftRounds = [];
+        $rightRounds = [];
+        $semifinalLabels = [];
+        foreach ($rounds as $roundName => $roundMatches) {
+            if (strcasecmp($roundName, 'Final') === 0) {
+                continue;
+            }
+
+            if (strcasecmp($roundName, 'Semifinal') === 0) {
+                foreach ($roundMatches as $index => $match) {
+                    $semifinalLabels[] = (string) ($match['print_match_label'] ?? ('Semifinal ' . ($index + 1)));
+                }
+            }
+
+            $half = (int) ceil(count($roundMatches) / 2);
+            $leftRounds[] = [
+                'name' => $roundName,
+                'matches' => array_slice($roundMatches, 0, $half),
+            ];
+            $rightRounds[] = [
+                'name' => $roundName,
+                'matches' => array_slice($roundMatches, $half),
+            ];
+        }
+
+        $matchCount = count($knockoutMatches);
+        $note = $matchCount > 15 ? 'This bracket has more than 16 knockout teams. A4 may be tight; larger paper is recommended.' : '';
+
+        return [
+            'rounds' => $rounds,
+            'source_labels' => $sourceLabels,
+            'final' => $final,
+            'left_rounds' => $leftRounds,
+            'right_rounds' => array_reverse($rightRounds),
+            'semifinal_labels' => $semifinalLabels,
+            'note' => $note,
+        ];
+    }
+
+    private function humanKnockoutRoundLabel(string $roundName): string
+    {
+        $normalized = strtolower(trim($roundName));
+        return match ($normalized) {
+            'play-in', 'play in', 'playin' => 'Play in',
+            'round of 16' => 'Round of 16',
+            'quarterfinal', 'quarterfinals' => 'Quarterfinal',
+            'semifinal', 'semifinals' => 'Semifinal',
+            'final' => 'Final',
+            default => $roundName !== '' ? $roundName : 'Round',
+        };
+    }
+
+    /**
+     * @return array{title: string}
+     */
+    private function printOutputMeta(string $printType): array
+    {
+        return match ($printType) {
+            'schedule_by_court' => ['title' => 'Schedule by Court'],
+            'schedule_by_group' => ['title' => 'Schedule by Group'],
+            'group_matrix' => ['title' => 'Group Round Robin Matrix'],
+            'knockout' => ['title' => 'Knockout Bracket'],
+            default => ['title' => 'Full Match Schedule'],
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function renderPrintView(string $view, array $data): void
+    {
+        $printViewFile = __DIR__ . '/../Views/' . $view . '.php';
+        if (!is_file($printViewFile)) {
+            throw new \RuntimeException(sprintf('View "%s" not found.', $view));
+        }
+
+        $config = $this->services['config'] ?? [];
+        $url = fn (string $path = '/'): string => $this->url($path);
+        extract($data, EXTR_SKIP);
+        require __DIR__ . '/../Views/admin/print/layout.php';
+    }
+
+    private function absoluteUrl(string $path): string
+    {
+        $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+            || ((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+            ? 'https'
+            : 'http';
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        return $scheme . '://' . $host . $this->url($path);
+    }
+
+    private function appTimezone(): \DateTimeZone
+    {
+        $config = $this->services['config'] ?? [];
+        $configured = is_array($config) ? ($config['app']['timezone'] ?? null) : null;
+        $timezone = is_string($configured) && trim($configured) !== '' ? trim($configured) : date_default_timezone_get();
+        try {
+            return new \DateTimeZone($timezone);
+        } catch (Throwable) {
+            return new \DateTimeZone('UTC');
+        }
+    }
+
     /**
      * @param array<string, mixed> $tournament
      */
@@ -581,6 +996,15 @@ final class TournamentController extends BaseController
             'knockout' => $this->url($baseAdminPath . '/knockout' . ($isSlugContext ? '' : '?id=' . $tournamentId)),
             'public_view' => $this->url($baseAdminPath . '/public_view' . ($isSlugContext ? '' : '?id=' . $tournamentId)),
             'teams' => $this->url($baseAdminPath . '/teams' . ($isSlugContext ? '' : '?id=' . $tournamentId)),
+            'exports' => $this->url($baseAdminPath . '/exports' . ($isSlugContext ? '' : '?id=' . $tournamentId)),
+        ];
+        $printRouteParams = $isSlugContext ? ['prefill' => 0] : ['id' => $tournamentId, 'prefill' => 0];
+        $printUrls = [
+            'schedule' => $this->url($baseAdminPath . '/print/schedule?' . http_build_query($printRouteParams)),
+            'schedule_by_court' => $this->url($baseAdminPath . '/print/schedule-by-court?' . http_build_query($printRouteParams)),
+            'schedule_by_group' => $this->url($baseAdminPath . '/print/schedule-by-group?' . http_build_query($printRouteParams)),
+            'group_matrix' => $this->url($baseAdminPath . '/print/group-matrix?' . http_build_query($printRouteParams)),
+            'knockout' => $this->url($baseAdminPath . '/print/knockout?' . http_build_query($printRouteParams)),
         ];
         $publicScreens = $this->buildPublicScreenSettingsViewData($tournamentModel, $tournamentId, $tournamentSlug);
 
@@ -686,6 +1110,7 @@ final class TournamentController extends BaseController
             'matchModes' => self::MATCH_MODES,
             'activeSection' => $section,
             'sectionNav' => $sectionNav,
+            'printUrls' => $printUrls,
             'matchesFilterActionUrl' => $sectionNav['matches'],
             'groupFilterOptions' => $groupFilterOptions,
             'courtFilterOptions' => $courtFilterOptions,

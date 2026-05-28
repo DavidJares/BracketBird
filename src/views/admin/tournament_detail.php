@@ -15,6 +15,7 @@ $sectionLabels = [
     'knockout' => 'Knockout',
     'public_view' => 'Public View',
     'teams' => 'Teams',
+    'exports' => 'Exports & Print',
 ];
 ?>
 <div class="bb-page-header">

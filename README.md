@@ -130,3 +130,5 @@ The Knockout admin area uses a responsive bracket-management workspace with gene
 The Superadmin Dashboard uses a responsive tournament overview with summary metrics, searchable compact tournament rows, copy actions, and a grouped create-tournament panel while preserving existing create, detail, and delete flows.
 
 The Public View admin area uses a responsive display-configuration workspace with display controls, overview content, branding/logo upload, and compact public-screen management while preserving existing public view and screen list save flows.
+
+The Exports & Print admin area provides read-only, browser-printable tournament papers for operational use: full match schedule, schedule by court, schedule by group, group round robin matrices, and knockout bracket. Print pages use dedicated A4 print CSS, include a non-print toolbar, support `prefill=0` and `prefill=1`, and keep status/progression logic untouched. Full print pack is intentionally left for a later pass because mixing portrait and landscape outputs in one browser print flow should be tested carefully before release.

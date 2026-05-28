@@ -14,6 +14,7 @@ $sidebarSectionLabels = [
     'knockout' => 'Knockout',
     'public_view' => 'Public View',
     'teams' => 'Teams',
+    'exports' => 'Exports & Print',
 ];
 $sidebarTournament = is_array($tournament ?? null) ? $tournament : null;
 $sidebarTournamentId = is_array($sidebarTournament) ? (int) ($sidebarTournament['id'] ?? 0) : 0;
