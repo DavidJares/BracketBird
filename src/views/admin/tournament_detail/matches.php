@@ -21,13 +21,13 @@ $hasUnassignedTeams = (int) ($groupAssignment['unassigned_count'] ?? 0) > 0;
 $hasExistingGroupMatches = isset($hasGroupMatches) && $hasGroupMatches;
 $generateConfirmMessageParts = [];
 if ($hasUnassignedTeams) {
-    $generateConfirmMessageParts[] = 'Some teams are unassigned and will be skipped.';
+    $generateConfirmMessageParts[] = $t('group_stage.unassigned_skipped');
 }
 if ($hasExistingGroupMatches) {
-    $generateConfirmMessageParts[] = 'Existing group-stage matches will be replaced.';
+    $generateConfirmMessageParts[] = $t('group_stage.existing_matches_replaced');
 }
 $generateConfirmMessage = implode(' ', $generateConfirmMessageParts);
-$generateFormOnSubmit = $generateConfirmMessage !== '' ? "return confirm('" . htmlspecialchars($generateConfirmMessage . ' Continue?', ENT_QUOTES, 'UTF-8') . "');" : '';
+$generateFormOnSubmit = $generateConfirmMessage !== '' ? 'return confirm(' . htmlspecialchars(json_encode($generateConfirmMessage . ' ' . $t('common.continue_question')), ENT_QUOTES, 'UTF-8') . ');' : '';
 $courtBadgeClasses = [
     'text-bg-primary',
     'text-bg-success',
@@ -87,21 +87,21 @@ $matchViewData = static function (array $match) use ($courtBadgeClasses): array 
     ];
 };
 
-$renderTeamName = static function (string $teamName, bool $isWinner): void {
+$renderTeamName = static function (string $teamName, bool $isWinner) use ($e): void {
     ?>
     <span class="bb-admin-match-team-name <?= $isWinner ? 'match-winner-name' : '' ?>">
         <?= htmlspecialchars($teamName !== '' ? $teamName : '-', ENT_QUOTES, 'UTF-8') ?>
     </span>
     <?php if ($isWinner): ?>
-        <span class="badge text-bg-light border text-secondary match-winner-badge">W</span>
+        <span class="badge text-bg-light border text-secondary match-winner-badge"><?= $e('common.winner_short') ?></span>
     <?php endif; ?>
     <?php
 };
 
-$renderStartAction = static function (array $match, string $status, int $tournamentId, int $selectedGroupFilter, int $selectedCourtFilter): void {
+$renderStartAction = static function (array $match, string $status, int $tournamentId, int $selectedGroupFilter, int $selectedCourtFilter) use ($e): void {
     if ($status !== 'scheduled') {
         ?>
-        <span class="text-muted small">Open detail</span>
+        <span class="text-muted small"><?= $e('common.open_detail') ?></span>
         <?php
         return;
     }
@@ -111,7 +111,7 @@ $renderStartAction = static function (array $match, string $status, int $tournam
         <input type="hidden" name="group_id" value="<?= $selectedGroupFilter ?>">
         <input type="hidden" name="court" value="<?= $selectedCourtFilter ?>">
         <input type="hidden" name="return_to" value="matches">
-        <button type="submit" class="btn btn-sm btn-outline-primary">Start</button>
+        <button type="submit" class="btn btn-sm btn-outline-primary"><?= $e('common.start') ?></button>
     </form>
     <?php
 };
@@ -119,27 +119,27 @@ $renderStartAction = static function (array $match, string $status, int $tournam
 <div class="bb-workspace bb-stage-workspace">
     <header class="bb-workspace-header">
         <div>
-            <div class="bb-page-kicker">Match control</div>
-            <h2>Group Stage</h2>
-            <p>Generate, schedule and manage group-stage matches.</p>
+            <div class="bb-page-kicker"><?= $e('group_stage.match_control') ?></div>
+            <h2><?= $e('group_stage.title') ?></h2>
+            <p><?= $e('group_stage.subtitle') ?></p>
         </div>
     </header>
 
     <section class="bb-stage-action-card">
         <div class="bb-stage-action-copy">
-            <span class="bb-settings-eyebrow">Generation</span>
-            <h3>Generate Group-stage Matches</h3>
-            <p>Creates round-robin matches in each group, then assigns courts, schedule order and planned start times.</p>
+            <span class="bb-settings-eyebrow"><?= $e('group_stage.generation') ?></span>
+            <h3><?= $e('group_stage.generate_matches') ?></h3>
+            <p><?= $e('group_stage.generate_matches_help') ?></p>
         </div>
         <div class="bb-stage-action-side">
             <?php if ($hasUnassignedTeams): ?>
                 <div class="alert alert-warning py-2 mb-2 small" role="alert">
-                    There are unassigned teams. Generation will include only assigned teams.
+                    <?= $e('group_stage.unassigned_generation_warning') ?>
                 </div>
             <?php endif; ?>
             <?php if ($hasExistingGroupMatches): ?>
                 <div class="alert alert-warning py-2 mb-2 small" role="alert">
-                    Group-stage matches already exist. Generation will replace existing group-stage matches.
+                    <?= $e('group_stage.existing_generation_warning') ?>
                 </div>
             <?php endif; ?>
             <form method="post" action="<?= htmlspecialchars($generateGroupMatchesActionUrl, ENT_QUOTES, 'UTF-8') ?>"<?= $generateFormOnSubmit !== '' ? ' onsubmit="' . $generateFormOnSubmit . '"' : '' ?>>
@@ -151,7 +151,7 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                 <?php if ($hasExistingGroupMatches): ?>
                     <input type="hidden" name="confirm_regenerate" value="1">
                 <?php endif; ?>
-                <button type="submit" class="btn btn-primary w-100">Generate group-stage matches</button>
+                <button type="submit" class="btn btn-primary w-100"><?= $e('group_stage.generate_group_stage_matches') ?></button>
             </form>
         </div>
     </section>
@@ -161,9 +161,9 @@ $renderStartAction = static function (array $match, string $status, int $tournam
             <form method="get" action="<?= htmlspecialchars($matchesFilterActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-stage-filter-form">
                 <input type="hidden" name="id" value="<?= $tournamentId ?>">
                 <div>
-                    <label for="group_id_filter" class="form-label mb-1">Group</label>
+                    <label for="group_id_filter" class="form-label mb-1"><?= $e('teams_groups.group') ?></label>
                     <select class="form-select form-select-sm" id="group_id_filter" name="group_id">
-                        <option value="0">All groups</option>
+                        <option value="0"><?= $e('group_stage.all_groups') ?></option>
                         <?php foreach ($groupFilterOptions as $groupId => $groupName): ?>
                             <option value="<?= (int) $groupId ?>" <?= $selectedGroupFilter === (int) $groupId ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($groupName, ENT_QUOTES, 'UTF-8') ?>
@@ -172,18 +172,18 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                     </select>
                 </div>
                 <div>
-                    <label for="court_filter" class="form-label mb-1">Court</label>
+                    <label for="court_filter" class="form-label mb-1"><?= $e('print.court') ?></label>
                     <select class="form-select form-select-sm" id="court_filter" name="court">
-                        <option value="0">All courts</option>
+                        <option value="0"><?= $e('group_stage.all_courts') ?></option>
                         <?php foreach ($courtFilterOptions as $court): ?>
                             <option value="<?= $court ?>" <?= $selectedCourtFilter === $court ? 'selected' : '' ?>>
-                                Court <?= $court ?>
+                                <?= $e('common.court_number', ['number' => $court]) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <button type="submit" class="btn btn-sm btn-primary">Filter</button>
-                <a href="<?= htmlspecialchars($matchesFilterActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-outline-secondary">Reset</a>
+                <button type="submit" class="btn btn-sm btn-primary"><?= $e('common.filter') ?></button>
+                <a href="<?= htmlspecialchars($matchesFilterActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-outline-secondary"><?= $e('common.reset') ?></a>
             </form>
         </section>
     <?php endif; ?>
@@ -191,18 +191,18 @@ $renderStartAction = static function (array $match, string $status, int $tournam
     <section class="bb-stage-board">
         <div class="bb-group-card-header">
             <div>
-                <span class="bb-settings-eyebrow">Matches</span>
-                <h3>Match Overview</h3>
+                <span class="bb-settings-eyebrow"><?= $e('group_stage.matches') ?></span>
+                <h3><?= $e('group_stage.match_overview') ?></h3>
             </div>
-            <span class="bb-status-pill"><?= count($groupMatches) ?> shown / <?= $groupMatchesTotalCount ?> total</span>
+            <span class="bb-status-pill"><?= $e('group_stage.shown_total', ['shown' => count($groupMatches), 'total' => $groupMatchesTotalCount]) ?></span>
         </div>
 
         <?php if (count($groupMatches) === 0): ?>
             <div class="bb-empty-state">
                 <?php if ($groupMatchesTotalCount > 0): ?>
-                    No matches found for selected filters.
+                    <?= $e('group_stage.no_matches_for_filters') ?>
                 <?php else: ?>
-                    No group-stage matches generated yet. Use the generation action above to prepare the schedule.
+                    <?= $e('group_stage.no_matches_generated') ?>
                 <?php endif; ?>
             </div>
         <?php else: ?>
@@ -220,14 +220,14 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                     </colgroup>
                     <thead>
                     <tr>
-                        <th>Order</th>
-                        <th>Group</th>
-                        <th>Match</th>
-                        <th>Result</th>
-                        <th>Court</th>
-                        <th>Start</th>
-                        <th>Status</th>
-                        <th class="text-end">Action</th>
+                        <th><?= $e('common.order') ?></th>
+                        <th><?= $e('teams_groups.group') ?></th>
+                        <th><?= $e('print.match') ?></th>
+                        <th><?= $e('print.result') ?></th>
+                        <th><?= $e('print.court') ?></th>
+                        <th><?= $e('print.start') ?></th>
+                        <th><?= $e('common.status') ?></th>
+                        <th class="text-end"><?= $e('common.action') ?></th>
                     </tr>
                     </thead>
                     <tbody>
@@ -255,13 +255,13 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                             </td>
                             <td>
                                 <?php if ((int) $view['court_number'] > 0): ?>
-                                    <span class="badge <?= htmlspecialchars((string) $view['court_badge_class'], ENT_QUOTES, 'UTF-8') ?>">Court <?= (int) $view['court_number'] ?></span>
+                                    <span class="badge <?= htmlspecialchars((string) $view['court_badge_class'], ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.court_number', ['number' => (int) $view['court_number']]) ?></span>
                                 <?php else: ?>
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
                             </td>
                             <td><?= htmlspecialchars((string) $view['planned_start'], ENT_QUOTES, 'UTF-8') ?></td>
-                            <td><span class="badge <?= htmlspecialchars((string) $view['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string) $view['status'], ENT_QUOTES, 'UTF-8') ?></span></td>
+                            <td><span class="badge <?= htmlspecialchars((string) $view['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= $e('match_status.' . (string) $view['status']) ?></span></td>
                             <td class="text-end">
                                 <?php $renderStartAction($match, (string) $view['status'], $tournamentId, $selectedGroupFilter, $selectedCourtFilter); ?>
                             </td>
@@ -283,7 +283,7 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                         <div class="bb-admin-match-card-top">
                             <span class="bb-admin-match-order">#<?= (int) ($match['schedule_order'] ?? 0) ?></span>
                             <span><?= htmlspecialchars((string) ($match['group_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
-                            <span class="badge <?= htmlspecialchars((string) $view['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string) $view['status'], ENT_QUOTES, 'UTF-8') ?></span>
+                            <span class="badge <?= htmlspecialchars((string) $view['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= $e('match_status.' . (string) $view['status']) ?></span>
                         </div>
                         <div class="bb-admin-match-card-teams">
                             <div><?php $renderTeamName($teamAName, (bool) $view['is_winner_a']); ?></div>
@@ -291,22 +291,22 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                         </div>
                         <div class="bb-admin-match-card-meta">
                             <div>
-                                <span>Result</span>
+                                <span><?= $e('print.result') ?></span>
                                 <strong><?= htmlspecialchars((string) $view['result_summary'], ENT_QUOTES, 'UTF-8') ?></strong>
                                 <?php if ((string) $view['set_scores_summary'] !== ''): ?>
                                     <small>(<?= htmlspecialchars((string) $view['set_scores_summary'], ENT_QUOTES, 'UTF-8') ?>)</small>
                                 <?php endif; ?>
                             </div>
                             <div>
-                                <span>Court</span>
+                                <span><?= $e('print.court') ?></span>
                                 <?php if ((int) $view['court_number'] > 0): ?>
-                                    <strong>Court <?= (int) $view['court_number'] ?></strong>
+                                    <strong><?= $e('common.court_number', ['number' => (int) $view['court_number']]) ?></strong>
                                 <?php else: ?>
                                     <strong>-</strong>
                                 <?php endif; ?>
                             </div>
                             <div>
-                                <span>Start</span>
+                                <span><?= $e('print.start') ?></span>
                                 <strong><?= htmlspecialchars((string) $view['planned_start'], ENT_QUOTES, 'UTF-8') ?></strong>
                             </div>
                         </div>

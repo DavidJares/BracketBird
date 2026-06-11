@@ -13,8 +13,8 @@ if (preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $startTimeValueRaw) ===
     $startTimeValue = substr($startTimeValueRaw, 0, 5);
 }
 $modeLabels = [
-    'fixed_2_sets' => 'Fixed 2 sets',
-    'best_of_3' => 'Best of 3',
+    'fixed_2_sets' => $t('match_mode.fixed_2_sets'),
+    'best_of_3' => $t('match_mode.best_of_3'),
 ];
 $currentSlug = (string) ($tournament['slug'] ?? '');
 $currentName = (string) ($tournament['name'] ?? '');
@@ -31,9 +31,9 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
 
     <div class="bb-settings-header">
         <div>
-            <div class="bb-page-kicker">Configuration</div>
-            <h2>Tournament Settings</h2>
-            <p>Basic configuration, rules and access for this tournament.</p>
+            <div class="bb-page-kicker"><?= $e('tournament.configuration') ?></div>
+            <h2><?= $e('tournament.settings') ?></h2>
+            <p><?= $e('tournament.settings_subtitle') ?></p>
         </div>
     </div>
 
@@ -43,28 +43,28 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                 <div class="bb-settings-card-header">
                     <div>
                         <span class="bb-settings-eyebrow">01</span>
-                        <h3>General Information</h3>
+                        <h3><?= $e('tournament.general_information') ?></h3>
                     </div>
-                    <p>Public identity, access links and event details.</p>
+                    <p><?= $e('tournament.general_information_help') ?></p>
                 </div>
 
                 <div class="bb-settings-fields">
                     <div class="bb-field bb-field-full">
-                        <label for="name" class="form-label">Name</label>
+                        <label for="name" class="form-label"><?= $e('tournament.name') ?></label>
                         <input type="text" name="name" id="name" class="form-control" required maxlength="150" value="<?= htmlspecialchars($currentName, ENT_QUOTES, 'UTF-8') ?>" data-original-name="<?= htmlspecialchars($currentName, ENT_QUOTES, 'UTF-8') ?>">
                     </div>
 
                     <div class="bb-field bb-field-full">
-                        <label for="slug_display" class="form-label">Slug</label>
+                        <label for="slug_display" class="form-label"><?= $e('tournament.slug') ?></label>
                         <div class="input-group bb-copy-group">
                             <input type="text" id="slug_display" class="form-control bg-body-tertiary text-muted border-secondary-subtle" readonly value="<?= htmlspecialchars($currentSlug, ENT_QUOTES, 'UTF-8') ?>" aria-readonly="true">
-                            <button type="button" class="btn btn-outline-secondary js-copy-slug" data-copy-target="slug_display">Copy</button>
+                            <button type="button" class="btn btn-outline-secondary js-copy-slug" data-copy-target="slug_display"><?= $e('common.copy') ?></button>
                         </div>
-                        <div class="form-text">Slug is read-only by default.</div>
+                        <div class="form-text"><?= $e('tournament.slug_readonly_help') ?></div>
                     </div>
 
                     <div class="bb-field bb-field-full">
-                        <label for="tournament_login_url" class="form-label">Tournament admin login URL</label>
+                        <label for="tournament_login_url" class="form-label"><?= $e('tournament.admin_login_url') ?></label>
                         <div class="input-group bb-copy-group">
                             <input
                                 type="text"
@@ -74,40 +74,40 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                                 value="<?= htmlspecialchars($currentLoginUrl, ENT_QUOTES, 'UTF-8') ?>"
                                 aria-readonly="true"
                             >
-                            <button type="button" class="btn btn-outline-secondary js-copy-slug" data-copy-target="tournament_login_url">Copy</button>
-                            <a id="tournament_login_url_open" class="btn btn-outline-secondary" href="<?= htmlspecialchars($currentLoginUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">Open</a>
+                            <button type="button" class="btn btn-outline-secondary js-copy-slug" data-copy-target="tournament_login_url"><?= $e('common.copy') ?></button>
+                            <a id="tournament_login_url_open" class="btn btn-outline-secondary" href="<?= htmlspecialchars($currentLoginUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener"><?= $e('common.open') ?></a>
                         </div>
                     </div>
 
                     <div id="js-slug-options" class="bb-field bb-field-full d-none">
                         <div class="alert alert-warning py-2 mb-2 small" role="alert">
-                            Name change suggests a new slug: <code id="js-proposed-slug">-</code>
+                            <?= $e('tournament.name_change_suggests_slug') ?> <code id="js-proposed-slug">-</code>
                         </div>
                         <div class="bb-radio-stack">
                             <div class="form-check">
                                 <input class="form-check-input" type="radio" name="slug_update_action" id="slug_update_action_keep" value="keep" checked>
-                                <label class="form-check-label" for="slug_update_action_keep">Keep current slug</label>
+                                <label class="form-check-label" for="slug_update_action_keep"><?= $e('tournament.keep_current_slug') ?></label>
                             </div>
                             <div class="form-check">
                                 <input class="form-check-input" type="radio" name="slug_update_action" id="slug_update_action_update" value="update">
-                                <label class="form-check-label" for="slug_update_action_update">Update slug to match tournament name</label>
+                                <label class="form-check-label" for="slug_update_action_update"><?= $e('tournament.update_slug_to_match_name') ?></label>
                             </div>
                         </div>
                     </div>
                     <input type="hidden" value="keep" id="slug_update_action_fallback">
 
                     <div class="bb-field">
-                        <label for="event_date" class="form-label">Event date</label>
+                        <label for="event_date" class="form-label"><?= $e('tournament.event_date') ?></label>
                         <input type="date" name="event_date" id="event_date" class="form-control" value="<?= htmlspecialchars((string) ($tournament['event_date'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
                     </div>
 
                     <div class="bb-field">
-                        <label for="start_time" class="form-label">Start time</label>
+                        <label for="start_time" class="form-label"><?= $e('tournament.start_time') ?></label>
                         <input type="time" name="start_time" id="start_time" class="form-control" value="<?= htmlspecialchars($startTimeValue, ENT_QUOTES, 'UTF-8') ?>">
                     </div>
 
                     <div class="bb-field bb-field-full">
-                        <label for="location" class="form-label">Location</label>
+                        <label for="location" class="form-label"><?= $e('tournament.location') ?></label>
                         <input type="text" name="location" id="location" class="form-control" maxlength="150" value="<?= htmlspecialchars((string) ($tournament['location'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
                     </div>
                 </div>
@@ -117,22 +117,22 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                 <div class="bb-settings-card-header">
                     <div>
                         <span class="bb-settings-eyebrow">02</span>
-                        <h3>Tournament Structure</h3>
+                        <h3><?= $e('tournament.structure') ?></h3>
                     </div>
-                    <p>Group layout, court capacity and bracket size.</p>
+                    <p><?= $e('tournament.structure_help') ?></p>
                 </div>
 
                 <div class="bb-settings-fields bb-settings-fields-compact">
                     <div class="bb-field">
-                        <label for="number_of_groups" class="form-label">Groups</label>
+                        <label for="number_of_groups" class="form-label"><?= $e('tournament.groups') ?></label>
                         <input type="number" class="form-control" name="number_of_groups" id="number_of_groups" min="1" max="52" value="<?= (int) ($tournament['number_of_groups'] ?? 1) ?>" required>
                     </div>
                     <div class="bb-field">
-                        <label for="number_of_courts" class="form-label">Courts</label>
+                        <label for="number_of_courts" class="form-label"><?= $e('tournament.courts') ?></label>
                         <input type="number" class="form-control" name="number_of_courts" id="number_of_courts" min="1" max="99" value="<?= (int) ($tournament['number_of_courts'] ?? 1) ?>" required>
                     </div>
                     <div class="bb-field">
-                        <label for="match_duration_minutes" class="form-label">Match duration</label>
+                        <label for="match_duration_minutes" class="form-label"><?= $e('tournament.match_duration') ?></label>
                         <div class="input-group">
                             <input type="number" class="form-control" name="match_duration_minutes" id="match_duration_minutes" min="1" max="240" value="<?= (int) ($tournament['match_duration_minutes'] ?? 20) ?>" required>
                             <span class="input-group-text">min</span>
@@ -140,13 +140,13 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                     </div>
                     <div class="bb-field">
                         <label for="advancing_teams_count" class="form-label d-inline-flex align-items-center gap-1">
-                            <span>Advancing teams</span>
+                            <span><?= $e('tournament.advancing_teams') ?></span>
                             <span
                                 class="badge rounded-pill text-bg-light border text-secondary bb-help-badge"
                                 data-bs-toggle="tooltip"
                                 data-bs-placement="top"
-                                data-bs-title="2, 4, 8, 16 create a standard bracket. Other counts use byes for top seeds. Example N=6: seeds 1 and 2 receive a bye, then 3 vs 6 and 4 vs 5."
-                                aria-label="Advancing teams help"
+                                data-bs-title="<?= $e('tournament.advancing_teams_help') ?>"
+                                aria-label="<?= $e('tournament.advancing_teams_help_label') ?>"
                             >i</span>
                         </label>
                         <input type="number" class="form-control" name="advancing_teams_count" id="advancing_teams_count" min="1" max="64" value="<?= (int) ($tournament['advancing_teams_count'] ?? 2) ?>" required>
@@ -160,14 +160,14 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                 <div class="bb-settings-card-header">
                     <div>
                         <span class="bb-settings-eyebrow">03</span>
-                        <h3>Match Rules</h3>
+                        <h3><?= $e('tournament.match_rules') ?></h3>
                     </div>
-                    <p>Scoring mode used in each tournament stage.</p>
+                    <p><?= $e('tournament.match_rules_help') ?></p>
                 </div>
 
                 <div class="bb-settings-fields bb-settings-fields-single">
                     <div class="bb-field">
-                        <label for="group_stage_mode" class="form-label">Group stage mode</label>
+                        <label for="group_stage_mode" class="form-label"><?= $e('tournament.group_stage_mode') ?></label>
                         <select class="form-select" name="group_stage_mode" id="group_stage_mode" required>
                             <?php foreach ($matchModes as $mode): ?>
                                 <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= ((string) ($tournament['group_stage_mode'] ?? ($tournament['match_mode'] ?? 'fixed_2_sets')) === $mode) ? 'selected' : '' ?>>
@@ -178,7 +178,7 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                     </div>
 
                     <div class="bb-field">
-                        <label for="knockout_mode" class="form-label">Knockout mode</label>
+                        <label for="knockout_mode" class="form-label"><?= $e('tournament.knockout_mode') ?></label>
                         <select class="form-select" name="knockout_mode" id="knockout_mode" required>
                             <?php foreach ($matchModes as $mode): ?>
                                 <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= ((string) ($tournament['knockout_mode'] ?? 'best_of_3') === $mode) ? 'selected' : '' ?>>
@@ -194,16 +194,16 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                 <div class="bb-settings-card-header">
                     <div>
                         <span class="bb-settings-eyebrow">04</span>
-                        <h3>Access</h3>
+                        <h3><?= $e('tournament.access') ?></h3>
                     </div>
-                    <p>Tournament-admin password for this event.</p>
+                    <p><?= $e('tournament.access_help') ?></p>
                 </div>
 
                 <div class="bb-settings-fields bb-settings-fields-single">
                     <div class="bb-field">
-                        <label for="admin_password" class="form-label">Tournament admin password</label>
-                        <input type="password" name="admin_password" id="admin_password" class="form-control" minlength="8" placeholder="Leave blank to keep unchanged">
-                        <div class="form-text">Leave blank to keep the current password.</div>
+                        <label for="admin_password" class="form-label"><?= $e('tournament.admin_password') ?></label>
+                        <input type="password" name="admin_password" id="admin_password" class="form-control" minlength="8" placeholder="<?= $e('tournament.leave_blank_keep_unchanged') ?>">
+                        <div class="form-text"><?= $e('tournament.leave_blank_keep_current_password') ?></div>
                     </div>
                 </div>
             </section>
@@ -212,10 +212,10 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
 
     <div class="bb-settings-savebar">
         <div>
-            <strong>Ready to apply changes?</strong>
-            <span>Settings are saved to this tournament only.</span>
+            <strong><?= $e('tournament.ready_to_apply_changes') ?></strong>
+            <span><?= $e('tournament.saved_to_this_tournament_only') ?></span>
         </div>
-        <button type="submit" class="btn btn-primary">Save tournament settings</button>
+        <button type="submit" class="btn btn-primary"><?= $e('tournament.save_settings') ?></button>
     </div>
 </form>
 <script>

@@ -16,26 +16,26 @@ $sourceLabels = is_array($knockoutPrint['source_labels'] ?? null) ? $knockoutPri
     <table class="bb-print-table bb-print-schedule-table">
         <thead>
         <tr>
-            <th>Time</th>
-            <th>Court</th>
-            <th>Stage</th>
-            <th>Group/Round</th>
-            <th>Team A</th>
-            <th>Team B</th>
-            <th>Result</th>
-            <th>Set 1</th>
-            <th>Set 2</th>
-            <th>Set 3</th>
+            <th><?= $h($t('print.time')) ?></th>
+            <th><?= $h($t('print.court')) ?></th>
+            <th><?= $h($t('print.stage')) ?></th>
+            <th><?= $h($t('print.group_round')) ?></th>
+            <th><?= $h($t('print.team_a')) ?></th>
+            <th><?= $h($t('print.team_b')) ?></th>
+            <th><?= $h($t('print.result')) ?></th>
+            <th><?= $h($t('print.set_1')) ?></th>
+            <th><?= $h($t('print.set_2')) ?></th>
+            <th><?= $h($t('print.set_3')) ?></th>
         </tr>
         </thead>
         <tbody>
         <?php if (count($allMatches) === 0): ?>
-            <tr><td colspan="10" class="bb-print-empty">No matches generated yet.</td></tr>
+            <tr><td colspan="10" class="bb-print-empty"><?= $h($t('print.no_matches_generated')) ?></td></tr>
         <?php endif; ?>
         <?php foreach ($allMatches as $match): ?>
             <tr>
                 <td><?= $h($formatTime((string) ($match['planned_start'] ?? ''))) ?></td>
-                <td><?= (int) ($match['court_number'] ?? 0) > 0 ? 'Court ' . (int) ($match['court_number'] ?? 0) : 'TBD' ?></td>
+                <td><?= (int) ($match['court_number'] ?? 0) > 0 ? $h($t('common.court_number', ['number' => (int) ($match['court_number'] ?? 0)])) : $h($t('common.tbd')) ?></td>
                 <td><?= $h((string) ($match['stage_label'] ?? '-')) ?></td>
                 <td><?= $h((string) ($match['context_label'] ?? '-')) ?></td>
                 <td><?= $h($teamLabel($match, 'a', $sourceLabels)) ?></td>

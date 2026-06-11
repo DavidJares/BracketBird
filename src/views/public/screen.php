@@ -40,19 +40,28 @@ $statusBadgeClass = static function (string $status): string {
     }
     return 'text-bg-secondary';
 };
-$stageLabel = static function (array $match): string {
+$publicScreenLabels = [
+    'overview' => $t('public.screen.overview'),
+    'next_matches' => $t('public.screen.next_matches'),
+    'standings' => $t('public.screen.standings'),
+    'group_schedule' => $t('public.screen.group_schedule'),
+    'knockout' => $t('public.screen.knockout'),
+    'recent_results' => $t('public.screen.recent_results'),
+];
+
+$stageLabel = static function (array $match) use ($t): string {
     $stage = (string) ($match['stage'] ?? '');
     if ($stage === 'group') {
         $groupName = trim((string) ($match['group_name'] ?? ''));
-        return $groupName !== '' ? ('Group ' . $groupName) : 'Group Stage';
+        return $groupName !== '' ? $t('teams_groups.group_name', ['name' => $groupName]) : $t('group_stage.title');
     }
     $roundName = trim((string) ($match['round_name'] ?? ''));
     if ($roundName === '') {
-        return 'Knockout';
+        return $t('knockout.title');
     }
     $position = (int) ($match['bracket_position'] ?? 0);
     if (strcasecmp($roundName, 'Final') === 0) {
-        return 'Final';
+        return $t('knockout.final');
     }
     return trim($roundName . ($position > 0 ? ' ' . $position : ''));
 };
@@ -83,19 +92,19 @@ $isWinnerForTeam = static function (array $match, string $side): bool {
     $teamId = $side === 'a' ? (int) ($match['team_a_id'] ?? 0) : (int) ($match['team_b_id'] ?? 0);
     return $winnerTeamId === $teamId;
 };
-$formatMatchTime = static function (?string $raw): string {
+$formatMatchTime = static function (?string $raw) use ($t): string {
     $value = trim((string) $raw);
     if ($value === '') {
-        return 'TBD';
+        return $t('common.tbd');
     }
     $dateTime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $value);
     if ($dateTime instanceof \DateTimeImmutable) {
         return $dateTime->format('H:i');
     }
     if (preg_match('/\b([01]\d|2[0-3]):[0-5]\d\b/', $value, $matches) === 1) {
-        return (string) ($matches[0] ?? 'TBD');
+        return (string) ($matches[0] ?? $t('common.tbd'));
     }
-    return 'TBD';
+    return $t('common.tbd');
 };
 $scoreText = static function (array $match): string {
     $status = (string) ($match['status'] ?? '');
@@ -123,14 +132,14 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
     <header class="bb-public-header">
         <div>
             <div class="bb-public-kicker"><?= htmlspecialchars($screenTitle, ENT_QUOTES, 'UTF-8') ?></div>
-            <h1 class="public-title"><?= htmlspecialchars((string) ($tournament['name'] ?? 'Tournament'), ENT_QUOTES, 'UTF-8') ?></h1>
+            <h1 class="public-title"><?= htmlspecialchars((string) ($tournament['name'] ?? $t('nav.tournament')), ENT_QUOTES, 'UTF-8') ?></h1>
             <div class="bb-public-meta-line">
                 <span><?= htmlspecialchars((string) ($tournament['event_date'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
-                <span><?= htmlspecialchars($startTime !== '' ? $startTime : 'Start TBD', ENT_QUOTES, 'UTF-8') ?></span>
+                <span><?= htmlspecialchars($startTime !== '' ? $startTime : $t('public.start_tbd'), ENT_QUOTES, 'UTF-8') ?></span>
                 <?php if (trim((string) ($tournament['location'] ?? '')) !== ''): ?>
                     <span><?= htmlspecialchars((string) $tournament['location'], ENT_QUOTES, 'UTF-8') ?></span>
                 <?php endif; ?>
-                <span>Now <span data-bb-local-now="<?= htmlspecialchars($nowIso ?? '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($nowLabel, ENT_QUOTES, 'UTF-8') ?></span></span>
+                <span><?= $e('public.now') ?> <span data-bb-local-now="<?= htmlspecialchars($nowIso ?? '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($nowLabel, ENT_QUOTES, 'UTF-8') ?></span></span>
             </div>
         </div>
         <?php if ($screenKey !== 'overview'): ?>
@@ -139,10 +148,10 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
     </header>
 
     <?php if (count($enabledScreens) > 1): ?>
-        <nav class="bb-public-nav" aria-label="Public screens">
+        <nav class="bb-public-nav" aria-label="<?= $e('public.screens') ?>">
             <?php foreach ($enabledScreens as $screen): ?>
                 <a href="<?= htmlspecialchars((string) $screen['url'], ENT_QUOTES, 'UTF-8') ?>" class="bb-public-nav-link <?= $screen['key'] === $screenKey ? 'active' : '' ?>">
-                    <?= htmlspecialchars((string) $screen['label'], ENT_QUOTES, 'UTF-8') ?>
+                    <?= htmlspecialchars((string) ($publicScreenLabels[(string) $screen['key']] ?? $screen['label']), ENT_QUOTES, 'UTF-8') ?>
                 </a>
             <?php endforeach; ?>
         </nav>
@@ -162,22 +171,22 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         ?>
         <div class="bb-public-hero">
             <div class="bb-public-hero-copy">
-                <div class="bb-public-kicker">Tournament public view</div>
+                <div class="bb-public-kicker"><?= $e('public.tournament_public_view') ?></div>
                 <h2><?= htmlspecialchars($overviewTitle, ENT_QUOTES, 'UTF-8') ?></h2>
                 <div class="bb-public-stat-grid">
-                    <div class="bb-public-stat"><span>Date</span><strong><?= htmlspecialchars((string) ($tournament['event_date'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></strong></div>
-                    <div class="bb-public-stat"><span>Start</span><strong><?= htmlspecialchars($startTime !== '' ? $startTime : '-', ENT_QUOTES, 'UTF-8') ?></strong></div>
-                    <div class="bb-public-stat"><span>Location</span><strong><?= htmlspecialchars((string) ($tournament['location'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></strong></div>
-                    <div class="bb-public-stat"><span>Current time</span><strong data-bb-local-now="<?= htmlspecialchars($nowIso ?? '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($nowLabel, ENT_QUOTES, 'UTF-8') ?></strong></div>
+                <div class="bb-public-stat"><span><?= $e('print.event_date') ?></span><strong><?= htmlspecialchars((string) ($tournament['event_date'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></strong></div>
+                <div class="bb-public-stat"><span><?= $e('print.start') ?></span><strong><?= htmlspecialchars($startTime !== '' ? $startTime : '-', ENT_QUOTES, 'UTF-8') ?></strong></div>
+                <div class="bb-public-stat"><span><?= $e('print.location') ?></span><strong><?= htmlspecialchars((string) ($tournament['location'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></strong></div>
+                <div class="bb-public-stat"><span><?= $e('public.current_time') ?></span><strong data-bb-local-now="<?= htmlspecialchars($nowIso ?? '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($nowLabel, ENT_QUOTES, 'UTF-8') ?></strong></div>
                 </div>
                 <?php if ($overviewDescription !== ''): ?>
                     <div class="bb-public-description">
-                        <span>About this tournament</span>
+                    <span><?= $e('public.about_this_tournament') ?></span>
                         <p><?= nl2br(htmlspecialchars($overviewDescription, ENT_QUOTES, 'UTF-8')) ?></p>
                     </div>
                 <?php endif; ?>
                 <?php if ($overviewMapButtonUrl !== ''): ?>
-                    <a href="<?= htmlspecialchars($overviewMapButtonUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="btn btn-lg btn-outline-primary">Open map</a>
+                    <a href="<?= htmlspecialchars($overviewMapButtonUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="btn btn-lg btn-outline-primary"><?= $e('public.open_map') ?></a>
                 <?php endif; ?>
             </div>
             <aside class="bb-public-hero-side">
@@ -196,10 +205,10 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         <?php endif; ?>
     <?php elseif ($screenKey === 'next_matches'): ?>
         <div class="bb-public-section-heading">
-            <div><span>Live now</span><strong>Current matches</strong></div>
+            <div><span><?= $e('public.live_now') ?></span><strong><?= $e('public.current_matches') ?></strong></div>
         </div>
         <?php if (!is_array($in_progress_matches ?? null) || count($in_progress_matches) === 0): ?>
-            <div class="bb-public-empty">No matches in progress.</div>
+                <div class="bb-public-empty"><?= $e('public.no_matches_in_progress') ?></div>
         <?php else: ?>
             <div class="bb-public-live-grid">
                 <?php foreach ($in_progress_matches as $match): ?>
@@ -212,16 +221,16 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         <div class="bb-public-versus">
                             <div class="bb-public-team <?= htmlspecialchars($winnerClassForTeam($match, 'a'), ENT_QUOTES, 'UTF-8') ?>">
                                 <span><?= htmlspecialchars($teamName($match, 'a'), ENT_QUOTES, 'UTF-8') ?></span>
-                                <?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                             </div>
                             <div class="bb-public-score"><?= htmlspecialchars($scoreText($match), ENT_QUOTES, 'UTF-8') ?></div>
                             <div class="bb-public-team <?= htmlspecialchars($winnerClassForTeam($match, 'b'), ENT_QUOTES, 'UTF-8') ?>">
                                 <span><?= htmlspecialchars($teamName($match, 'b'), ENT_QUOTES, 'UTF-8') ?></span>
-                                <?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                             </div>
                         </div>
                         <div class="bb-public-match-meta">
-                            <?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($badgeClass, ENT_QUOTES, 'UTF-8') ?>">Court <?= $court ?></span><?php else: ?><span>Court TBD</span><?php endif; ?>
+<?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($badgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.court_number', ['number' => $court]) ?></span><?php else: ?><span><?= $e('knockout.court_tbd') ?></span><?php endif; ?>
                         </div>
                     </article>
                 <?php endforeach; ?>
@@ -229,10 +238,10 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         <?php endif; ?>
 
         <div class="bb-public-section-heading mt-4">
-            <div><span>Coming up</span><strong>Next scheduled</strong></div>
+            <div><span><?= $e('public.coming_up') ?></span><strong><?= $e('public.next_scheduled') ?></strong></div>
         </div>
         <?php if (!is_array($next_matches ?? null) || count($next_matches) === 0): ?>
-            <div class="bb-public-empty">No scheduled matches.</div>
+                <div class="bb-public-empty"><?= $e('public.no_scheduled_matches') ?></div>
         <?php else: ?>
             <div class="bb-public-match-grid">
                 <?php foreach ($next_matches as $match): ?>
@@ -244,12 +253,12 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         </div>
                         <div class="bb-public-match-teams">
                             <strong><?= htmlspecialchars($teamName($match, 'a'), ENT_QUOTES, 'UTF-8') ?></strong>
-                            <span>vs</span>
+                            <span><?= $e('common.vs') ?></span>
                             <strong><?= htmlspecialchars($teamName($match, 'b'), ENT_QUOTES, 'UTF-8') ?></strong>
                         </div>
                         <div class="bb-public-match-meta">
                             <span><?= htmlspecialchars($stageLabel($match), ENT_QUOTES, 'UTF-8') ?></span>
-                            <?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($badgeClass, ENT_QUOTES, 'UTF-8') ?>">Court <?= $court ?></span><?php endif; ?>
+<?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($badgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.court_number', ['number' => $court]) ?></span><?php endif; ?>
                         </div>
                     </article>
                 <?php endforeach; ?>
@@ -268,15 +277,15 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         }
         ?>
         <?php if (!is_array($groupStandingsByGroup ?? null) || count($groupStandingsByGroup) === 0): ?>
-            <div class="bb-public-empty">No standings available yet.</div>
+                <div class="bb-public-empty"><?= $e('public.no_standings_available') ?></div>
         <?php else: ?>
             <div class="bb-public-standings-grid">
                 <?php foreach ($groupStandingsByGroup as $groupId => $rows): ?>
                     <section class="bb-public-standings-card">
-                        <div class="bb-public-card-title">Group <?= htmlspecialchars((string) ($groupNameById[(int) $groupId] ?? $groupId), ENT_QUOTES, 'UTF-8') ?></div>
+                        <div class="bb-public-card-title"><?= $e('teams_groups.group_name', ['name' => (string) ($groupNameById[(int) $groupId] ?? $groupId)]) ?></div>
                         <div class="table-responsive">
                             <table class="table table-sm mb-0 public-table public-standings">
-                                <thead><tr><th class="col-rank">#</th><th class="col-team">Team</th><th class="col-num">P</th><th class="col-num">W</th><th class="col-num">D</th><th class="col-num">L</th><th class="col-num">Pts</th><th class="col-num">Diff</th></tr></thead>
+                    <thead><tr><th class="col-rank">#</th><th class="col-team"><?= $e('print.team') ?></th><th class="col-num">P</th><th class="col-num">W</th><th class="col-num">D</th><th class="col-num">L</th><th class="col-num"><?= $e('print.points_short') ?></th><th class="col-num"><?= $e('print.diff') ?></th></tr></thead>
                                 <tbody>
                                 <?php foreach ($rows as $row): ?>
                                     <?php $position = (int) ($row['position'] ?? 0); ?>
@@ -300,7 +309,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         <?php endif; ?>
     <?php elseif ($screenKey === 'group_schedule'): ?>
         <?php if (!is_array($groupMatches ?? null) || count($groupMatches) === 0): ?>
-            <div class="bb-public-empty">No group matches.</div>
+                <div class="bb-public-empty"><?= $e('public.no_group_matches') ?></div>
         <?php else: ?>
             <div class="bb-public-feed">
                 <?php foreach ($groupMatches as $match): ?>
@@ -309,7 +318,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         <div class="bb-public-feed-time"><?= htmlspecialchars($formatMatchTime((string) ($match['planned_start'] ?? '')), ENT_QUOTES, 'UTF-8') ?></div>
                         <div class="bb-public-schedule-team bb-public-schedule-team-a <?= htmlspecialchars($winnerClassForTeam($match, 'a'), ENT_QUOTES, 'UTF-8') ?>">
                             <strong><?= htmlspecialchars($teamName($match, 'a'), ENT_QUOTES, 'UTF-8') ?></strong>
-                            <?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                             <?php if ($scoreA !== ''): ?><span class="bb-public-mobile-team-score"><?= htmlspecialchars($scoreA, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
                         </div>
                         <div class="bb-public-schedule-score <?= $setScoresSummary === '' ? 'bb-public-mobile-empty-score' : '' ?>">
@@ -318,13 +327,13 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         </div>
                         <div class="bb-public-schedule-team bb-public-schedule-team-b <?= htmlspecialchars($winnerClassForTeam($match, 'b'), ENT_QUOTES, 'UTF-8') ?>">
                             <strong><?= htmlspecialchars($teamName($match, 'b'), ENT_QUOTES, 'UTF-8') ?></strong>
-                            <?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                             <?php if ($scoreB !== ''): ?><span class="bb-public-mobile-team-score"><?= htmlspecialchars($scoreB, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
                         </div>
                         <div class="bb-public-schedule-meta">
                             <span class="badge <?= htmlspecialchars($statusBadgeClass($status), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($status, ENT_QUOTES, 'UTF-8') ?></span>
-                            <?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>">Court <?= $court ?></span><?php endif; ?>
-                            <span class="bb-public-schedule-group">Group <?= htmlspecialchars((string) ($match['group_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
+<?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.court_number', ['number' => $court]) ?></span><?php endif; ?>
+<span class="bb-public-schedule-group"><?= $e('teams_groups.group_name', ['name' => (string) ($match['group_name'] ?? '-')]) ?></span>
                         </div>
                     </article>
                 <?php endforeach; ?>
@@ -370,9 +379,9 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         unset($roundMatches);
         ?>
         <?php if (!is_array($knockoutMatches ?? null) || count($knockoutMatches) === 0): ?>
-            <div class="bb-public-empty">No knockout matches.</div>
+                <div class="bb-public-empty"><?= $e('public.no_knockout_matches') ?></div>
         <?php else: ?>
-            <div class="bb-public-bracket-hint">Swipe to view bracket</div>
+            <div class="bb-public-bracket-hint"><?= $e('knockout.swipe_hint') ?></div>
             <div class="bb-public-bracket-wrap">
                 <div class="bb-public-bracket-grid">
                     <?php foreach ($rounds as $roundName => $roundMatches): ?>
@@ -397,12 +406,12 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                                     </div>
                                     <div class="bb-public-bracket-team <?= htmlspecialchars($winnerClassForTeam($match, 'a'), ENT_QUOTES, 'UTF-8') ?>">
                                         <span><?= htmlspecialchars($teamName($match, 'a'), ENT_QUOTES, 'UTF-8') ?></span>
-                                        <?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                                     </div>
                                     <?php if ($sourceALabel !== ''): ?><div class="bb-public-source"><?= htmlspecialchars($sourceALabel, ENT_QUOTES, 'UTF-8') ?></div><?php endif; ?>
                                     <div class="bb-public-bracket-team <?= htmlspecialchars($winnerClassForTeam($match, 'b'), ENT_QUOTES, 'UTF-8') ?>">
                                         <span><?= htmlspecialchars($teamName($match, 'b'), ENT_QUOTES, 'UTF-8') ?></span>
-                                        <?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                                     </div>
                                     <?php if ($sourceBLabel !== ''): ?><div class="bb-public-source"><?= htmlspecialchars($sourceBLabel, ENT_QUOTES, 'UTF-8') ?></div><?php endif; ?>
                                     <div class="bb-public-bracket-result">
@@ -410,7 +419,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                                         <?php if ($setScoresSummary !== ''): ?><span>(<?= htmlspecialchars($setScoresSummary, ENT_QUOTES, 'UTF-8') ?>)</span><?php endif; ?>
                                     </div>
                                     <div class="bb-public-match-meta">
-                                        <?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>">Court <?= $court ?></span><?php else: ?><span>Court TBD</span><?php endif; ?>
+<?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.court_number', ['number' => $court]) ?></span><?php else: ?><span><?= $e('knockout.court_tbd') ?></span><?php endif; ?>
                                         <span><?= htmlspecialchars($formatMatchTime((string) ($match['planned_start'] ?? '')), ENT_QUOTES, 'UTF-8') ?></span>
                                     </div>
                                 </article>
@@ -422,7 +431,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
         <?php endif; ?>
     <?php else: ?>
         <?php if (!is_array($recentResults ?? null) || count($recentResults) === 0): ?>
-            <div class="bb-public-empty">No finished matches yet.</div>
+                <div class="bb-public-empty"><?= $e('public.no_finished_matches') ?></div>
         <?php else: ?>
             <div class="bb-public-result-feed">
                 <?php foreach ($recentResults as $match): ?>
@@ -431,7 +440,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         <div class="bb-public-result-stage"><?= htmlspecialchars($stageLabel($match), ENT_QUOTES, 'UTF-8') ?></div>
                         <div class="bb-public-schedule-team bb-public-result-team-a <?= htmlspecialchars($winnerClassForTeam($match, 'a'), ENT_QUOTES, 'UTF-8') ?>">
                             <strong><?= htmlspecialchars($teamName($match, 'a'), ENT_QUOTES, 'UTF-8') ?></strong>
-                            <?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'a')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                             <?php if ($scoreA !== ''): ?><span class="bb-public-mobile-team-score"><?= htmlspecialchars($scoreA, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
                         </div>
                         <div class="bb-public-schedule-score bb-public-result-score <?= $setScoresSummary === '' ? 'bb-public-mobile-empty-score' : '' ?>">
@@ -440,12 +449,12 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         </div>
                         <div class="bb-public-schedule-team bb-public-schedule-team-b bb-public-result-team-b <?= htmlspecialchars($winnerClassForTeam($match, 'b'), ENT_QUOTES, 'UTF-8') ?>">
                             <strong><?= htmlspecialchars($teamName($match, 'b'), ENT_QUOTES, 'UTF-8') ?></strong>
-                            <?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner">W</span><?php endif; ?>
+<?php if ($isWinnerForTeam($match, 'b')): ?><span class="bb-public-winner"><?= $e('common.winner_short') ?></span><?php endif; ?>
                             <?php if ($scoreB !== ''): ?><span class="bb-public-mobile-team-score"><?= htmlspecialchars($scoreB, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
                         </div>
                         <div class="bb-public-schedule-meta bb-public-result-badges">
                             <span class="badge <?= htmlspecialchars($statusBadgeClass($status), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($status, ENT_QUOTES, 'UTF-8') ?></span>
-                            <?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>">Court <?= $court ?></span><?php endif; ?>
+<?php if ($court > 0): ?><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.court_number', ['number' => $court]) ?></span><?php endif; ?>
                         </div>
                     </article>
                 <?php endforeach; ?>

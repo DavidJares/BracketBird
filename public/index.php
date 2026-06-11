@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Controllers\HomeController;
 use App\Controllers\SetupController;
+use App\Controllers\LanguageController;
 use App\Controllers\AuthController;
 use App\Controllers\AdminDashboardController;
 use App\Controllers\TournamentAdminAuthController;
@@ -39,6 +40,7 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
 $router = new Router();
 $homeController = new HomeController($services);
 $setupController = new SetupController($services);
+$languageController = new LanguageController($services);
 $authController = new AuthController($services);
 $adminDashboardController = new AdminDashboardController($services);
 $tournamentAdminAuthController = new TournamentAdminAuthController($services);
@@ -48,6 +50,7 @@ $publicViewController = new PublicViewController($services);
 $router->get('/', [$homeController, 'index']);
 $router->get('/setup', [$setupController, 'index']);
 $router->post('/setup', [$setupController, 'store']);
+$router->post('/language', [$languageController, 'switch']);
 
 $router->get('/admin/login', [$authController, 'loginForm']);
 $router->post('/admin/login', [$authController, 'login']);

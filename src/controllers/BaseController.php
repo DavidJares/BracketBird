@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Models\Database;
+use App\Support\Language;
+use App\Support\Translator;
 
 abstract class BaseController
 {
@@ -37,6 +39,11 @@ abstract class BaseController
         $csrfField = fn (): string => $this->csrfField();
         $currentSuperadmin = $this->currentSuperadmin();
         $currentTournamentAdmin = $this->currentTournamentAdmin();
+        $languages = Language::available();
+        $currentLanguage = Language::resolve();
+        $translator = new Translator($currentLanguage);
+        $t = fn (string $key, array $params = []): string => $translator->translate($key, $params);
+        $e = fn (string $key, array $params = []): string => htmlspecialchars($translator->translate($key, $params), ENT_QUOTES, 'UTF-8');
         $url = fn (string $path = '/'): string => $this->url($path);
         extract($data, EXTR_SKIP);
 
@@ -139,11 +146,19 @@ abstract class BaseController
         return (int) $value;
     }
 
+    /**
+     * @param array<string, string|int|float> $params
+     */
+    protected function translate(string $key, array $params = []): string
+    {
+        return (new Translator(Language::resolve()))->translate($key, $params);
+    }
+
     protected function setFlash(string $type, string $message): void
     {
         $_SESSION['flash'] = [
             'type' => $type,
-            'message' => $message,
+            'message' => $this->translate($message),
         ];
     }
 

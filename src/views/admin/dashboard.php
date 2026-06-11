@@ -6,8 +6,8 @@ declare(strict_types=1);
 /** @var list<string> $matchModes */
 
 $modeLabels = [
-    'fixed_2_sets' => 'Fixed 2 sets',
-    'best_of_3' => 'Best of 3',
+    'fixed_2_sets' => $t('match_mode.fixed_2_sets'),
+    'best_of_3' => $t('match_mode.best_of_3'),
 ];
 $isHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
     || ((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
@@ -69,28 +69,28 @@ usort(
 <section class="bb-dashboard-shell">
     <header class="bb-workspace-header bb-dashboard-header">
         <div>
-            <span class="bb-section-kicker">Superadmin</span>
-            <h2>Tournaments</h2>
-            <p>Manage tournaments, admin access and public displays.</p>
+            <span class="bb-section-kicker"><?= $e('dashboard.superadmin') ?></span>
+            <h2><?= $e('dashboard.tournaments') ?></h2>
+            <p><?= $e('dashboard.subtitle') ?></p>
         </div>
-        <a href="#create-tournament" class="btn btn-primary">Create tournament</a>
+        <a href="#create-tournament" class="btn btn-primary"><?= $e('dashboard.create_tournament') ?></a>
     </header>
 
-    <section class="bb-metric-grid" aria-label="Tournament summary">
+    <section class="bb-metric-grid" aria-label="<?= $e('dashboard.tournament_summary') ?>">
         <div class="bb-metric-card">
-            <span>Total tournaments</span>
+            <span><?= $e('dashboard.total_tournaments') ?></span>
             <strong><?= $totalTournaments ?></strong>
         </div>
         <div class="bb-metric-card">
-            <span>Upcoming</span>
+            <span><?= $e('dashboard.upcoming') ?></span>
             <strong><?= $upcomingTournaments ?></strong>
         </div>
         <div class="bb-metric-card">
-            <span>Public enabled</span>
+            <span><?= $e('dashboard.public_enabled') ?></span>
             <strong><?= $publicViewEnabledCount ?></strong>
         </div>
         <div class="bb-metric-card">
-            <span>Draft/private</span>
+            <span><?= $e('dashboard.draft_private') ?></span>
             <strong><?= max(0, $totalTournaments - $publicViewEnabledCount) ?></strong>
         </div>
     </section>
@@ -98,18 +98,18 @@ usort(
     <section class="bb-dashboard-section">
         <div class="bb-board-section-heading">
             <div>
-                <span class="bb-section-kicker">Overview</span>
-                <h3>Tournament Control Center</h3>
+                <span class="bb-section-kicker"><?= $e('dashboard.overview') ?></span>
+                <h3><?= $e('dashboard.control_center') ?></h3>
             </div>
         </div>
 
         <?php if ($totalTournaments === 0): ?>
-            <div class="bb-empty-state">No tournaments yet. Create the first tournament below.</div>
+            <div class="bb-empty-state"><?= $e('dashboard.no_tournaments_yet') ?></div>
         <?php else: ?>
             <div class="bb-dashboard-toolbar">
-                <label for="dashboard_tournament_search" class="visually-hidden">Search tournaments</label>
-                <input type="search" class="form-control" id="dashboard_tournament_search" placeholder="Search tournaments..." autocomplete="off">
-                <span id="dashboard_tournament_count"><?= $totalTournaments ?> tournament<?= $totalTournaments === 1 ? '' : 's' ?></span>
+                <label for="dashboard_tournament_search" class="visually-hidden"><?= $e('dashboard.search_tournaments') ?></label>
+                <input type="search" class="form-control" id="dashboard_tournament_search" placeholder="<?= $e('dashboard.search_tournaments_placeholder') ?>" autocomplete="off">
+                <span id="dashboard_tournament_count"><?= $e('dashboard.tournament_count', ['count' => $totalTournaments]) ?></span>
             </div>
 
             <div class="bb-dashboard-list" id="dashboard_tournament_list">
@@ -139,46 +139,46 @@ usort(
                                 <code><?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?></code>
                             </div>
                             <div class="bb-tournament-row-meta">
-                                <span><?= htmlspecialchars($eventDate !== '' ? $eventDate : 'No date', ENT_QUOTES, 'UTF-8') ?></span>
-                                <span><?= htmlspecialchars($startTime !== '' ? $startTime : 'No start', ENT_QUOTES, 'UTF-8') ?></span>
-                                <span><?= htmlspecialchars($location !== '' ? $location : 'No location', ENT_QUOTES, 'UTF-8') ?></span>
+                                <span><?= htmlspecialchars($eventDate !== '' ? $eventDate : $t('common.no_date'), ENT_QUOTES, 'UTF-8') ?></span>
+                                <span><?= htmlspecialchars($startTime !== '' ? $startTime : $t('common.no_start'), ENT_QUOTES, 'UTF-8') ?></span>
+                                <span><?= htmlspecialchars($location !== '' ? $location : $t('common.no_location'), ENT_QUOTES, 'UTF-8') ?></span>
                             </div>
                         </div>
 
-                        <div class="bb-tournament-row-badges" aria-label="Tournament status and rules">
-                            <span class="badge <?= $publicViewEnabled ? 'text-bg-success' : 'text-bg-secondary' ?>"><?= $publicViewEnabled ? 'Public' : 'Private' ?></span>
+                        <div class="bb-tournament-row-badges" aria-label="<?= $e('dashboard.tournament_status_and_rules') ?>">
+                            <span class="badge <?= $publicViewEnabled ? 'text-bg-success' : 'text-bg-secondary' ?>"><?= $publicViewEnabled ? $e('common.public') : $e('common.private') ?></span>
                             <div class="bb-tournament-mode-group">
-                                <span class="bb-tournament-mode-pill">Group: <?= htmlspecialchars($groupModeLabel, ENT_QUOTES, 'UTF-8') ?></span>
-                                <span class="bb-tournament-mode-pill">KO: <?= htmlspecialchars($knockoutModeLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                                <span class="bb-tournament-mode-pill"><?= $e('dashboard.group_mode', ['mode' => $groupModeLabel]) ?></span>
+                                <span class="bb-tournament-mode-pill"><?= $e('dashboard.ko_mode', ['mode' => $knockoutModeLabel]) ?></span>
                             </div>
                         </div>
 
                         <div class="bb-tournament-actions">
-                            <div class="bb-action-group" aria-label="Tournament actions">
-                                <a class="btn btn-sm btn-primary bb-tournament-primary-action" href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>">Detail</a>
-                                <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>">Copy slug</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($adminLoginUrl, ENT_QUOTES, 'UTF-8') ?>">Copy admin URL</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($publicDisplayUrl, ENT_QUOTES, 'UTF-8') ?>">Copy display URL</button>
-                                <form method="post" action="<?= htmlspecialchars($url('/admin/tournaments/delete'), ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm('Delete this tournament and all related data?');">
+                            <div class="bb-action-group" aria-label="<?= $e('dashboard.tournament_actions') ?>">
+                                <a class="btn btn-sm btn-primary bb-tournament-primary-action" href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.detail') ?></a>
+                                <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>"><?= $e('dashboard.copy_slug') ?></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($adminLoginUrl, ENT_QUOTES, 'UTF-8') ?>"><?= $e('dashboard.copy_admin_url') ?></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($publicDisplayUrl, ENT_QUOTES, 'UTF-8') ?>"><?= $e('dashboard.copy_display_url') ?></button>
+                                <form method="post" action="<?= htmlspecialchars($url('/admin/tournaments/delete'), ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('dashboard.delete_tournament_confirm')), ENT_QUOTES, 'UTF-8') ?>);">
                                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                                     <input type="hidden" name="confirm_delete" value="1">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><?= $e('common.delete') ?></button>
                                 </form>
                             </div>
                         </div>
                     </article>
                 <?php endforeach; ?>
             </div>
-            <div class="bb-empty-state d-none" id="dashboard_tournament_empty">No tournaments match your search.</div>
+            <div class="bb-empty-state d-none" id="dashboard_tournament_empty"><?= $e('dashboard.no_tournaments_match') ?></div>
         <?php endif; ?>
     </section>
 
     <section id="create-tournament" class="bb-create-tournament-panel">
         <div class="bb-workspace-card-header">
             <div>
-                <span class="bb-section-kicker">Create</span>
-                <h3>Create Tournament</h3>
-                <p>Set up the tournament shell, access password, structure and scoring rules.</p>
+                <span class="bb-section-kicker"><?= $e('dashboard.create') ?></span>
+                <h3><?= $e('dashboard.create_tournament_title') ?></h3>
+                <p><?= $e('dashboard.create_tournament_subtitle') ?></p>
             </div>
         </div>
 
@@ -187,33 +187,33 @@ usort(
                 <div class="bb-create-form-section-head">
                     <span>01</span>
                     <div>
-                        <h4>Basic Information</h4>
-                        <p>Name, slug preview and event details.</p>
+                        <h4><?= $e('tournament.basic_information') ?></h4>
+                        <p><?= $e('dashboard.basic_information_help') ?></p>
                     </div>
                 </div>
                 <div class="bb-create-form-grid">
                     <div class="bb-field bb-field-full">
-                        <label for="name" class="form-label">Name</label>
+                        <label for="name" class="form-label"><?= $e('tournament.name') ?></label>
                         <input type="text" class="form-control" name="name" id="name" required maxlength="150" autocomplete="off">
                     </div>
                     <div class="bb-field bb-field-full">
-                        <label for="slug" class="form-label">Slug</label>
+                        <label for="slug" class="form-label"><?= $e('tournament.slug') ?></label>
                         <div class="bb-copy-group">
                             <input type="text" class="form-control" name="slug" id="slug" readonly maxlength="150" aria-readonly="true">
-                            <button type="button" class="btn btn-outline-secondary js-copy-slug" data-copy-target="slug">Copy</button>
+                            <button type="button" class="btn btn-outline-secondary js-copy-slug" data-copy-target="slug"><?= $e('common.copy') ?></button>
                         </div>
-                        <div class="form-text">Auto-generated from tournament name. Unique suffix will be added automatically if needed.</div>
+                        <div class="form-text"><?= $e('dashboard.slug_help') ?></div>
                     </div>
                     <div class="bb-field">
-                        <label for="event_date" class="form-label">Event date</label>
+                        <label for="event_date" class="form-label"><?= $e('tournament.event_date') ?></label>
                         <input type="date" class="form-control" name="event_date" id="event_date">
                     </div>
                     <div class="bb-field">
-                        <label for="start_time" class="form-label">Start time</label>
+                        <label for="start_time" class="form-label"><?= $e('tournament.start_time') ?></label>
                         <input type="time" class="form-control" name="start_time" id="start_time" value="09:00">
                     </div>
                     <div class="bb-field bb-field-full">
-                        <label for="location" class="form-label">Location</label>
+                        <label for="location" class="form-label"><?= $e('tournament.location') ?></label>
                         <input type="text" class="form-control" name="location" id="location" maxlength="150">
                     </div>
                 </div>
@@ -223,13 +223,13 @@ usort(
                 <div class="bb-create-form-section-head">
                     <span>02</span>
                     <div>
-                        <h4>Access</h4>
-                        <p>Password for the tournament admin login.</p>
+                        <h4><?= $e('tournament.access') ?></h4>
+                        <p><?= $e('dashboard.access_help') ?></p>
                     </div>
                 </div>
                 <div class="bb-create-form-grid bb-create-form-grid-single">
                     <div class="bb-field">
-                        <label for="admin_password" class="form-label">Tournament admin password</label>
+                        <label for="admin_password" class="form-label"><?= $e('tournament.admin_password') ?></label>
                         <input type="password" class="form-control" name="admin_password" id="admin_password" required minlength="8">
                     </div>
                 </div>
@@ -239,25 +239,25 @@ usort(
                 <div class="bb-create-form-section-head">
                     <span>03</span>
                     <div>
-                        <h4>Structure</h4>
-                        <p>Groups, courts, pacing and bracket size.</p>
+                        <h4><?= $e('tournament.structure') ?></h4>
+                        <p><?= $e('dashboard.structure_help') ?></p>
                     </div>
                 </div>
                 <div class="bb-create-form-grid bb-create-form-grid-compact">
                     <div class="bb-field">
-                        <label for="number_of_groups" class="form-label">Groups</label>
+                        <label for="number_of_groups" class="form-label"><?= $e('tournament.groups') ?></label>
                         <input type="number" class="form-control" name="number_of_groups" id="number_of_groups" min="1" max="52" value="2" required>
                     </div>
                     <div class="bb-field">
-                        <label for="number_of_courts" class="form-label">Courts</label>
+                        <label for="number_of_courts" class="form-label"><?= $e('tournament.courts') ?></label>
                         <input type="number" class="form-control" name="number_of_courts" id="number_of_courts" min="1" max="99" value="1" required>
                     </div>
                     <div class="bb-field">
-                        <label for="match_duration_minutes" class="form-label">Match duration</label>
+                        <label for="match_duration_minutes" class="form-label"><?= $e('tournament.match_duration') ?></label>
                         <input type="number" class="form-control" name="match_duration_minutes" id="match_duration_minutes" min="1" max="240" value="20" required>
                     </div>
                     <div class="bb-field">
-                        <label for="advancing_teams_count" class="form-label">Advancing teams</label>
+                        <label for="advancing_teams_count" class="form-label"><?= $e('tournament.advancing_teams') ?></label>
                         <input type="number" class="form-control" name="advancing_teams_count" id="advancing_teams_count" min="1" max="64" value="2" required>
                     </div>
                 </div>
@@ -267,13 +267,13 @@ usort(
                 <div class="bb-create-form-section-head">
                     <span>04</span>
                     <div>
-                        <h4>Rules</h4>
-                        <p>Match modes for group and knockout play.</p>
+                        <h4><?= $e('tournament.rules') ?></h4>
+                        <p><?= $e('dashboard.rules_help') ?></p>
                     </div>
                 </div>
                 <div class="bb-create-form-grid">
                     <div class="bb-field">
-                        <label for="group_stage_mode" class="form-label">Group stage mode</label>
+                        <label for="group_stage_mode" class="form-label"><?= $e('tournament.group_stage_mode') ?></label>
                         <select class="form-select" name="group_stage_mode" id="group_stage_mode" required>
                             <?php foreach ($matchModes as $mode): ?>
                                 <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= $mode === 'fixed_2_sets' ? 'selected' : '' ?>><?= htmlspecialchars((string) ($modeLabels[$mode] ?? $mode), ENT_QUOTES, 'UTF-8') ?></option>
@@ -281,7 +281,7 @@ usort(
                         </select>
                     </div>
                     <div class="bb-field">
-                        <label for="knockout_mode" class="form-label">Knockout mode</label>
+                        <label for="knockout_mode" class="form-label"><?= $e('tournament.knockout_mode') ?></label>
                         <select class="form-select" name="knockout_mode" id="knockout_mode" required>
                             <?php foreach ($matchModes as $mode): ?>
                                 <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= $mode === 'best_of_3' ? 'selected' : '' ?>><?= htmlspecialchars((string) ($modeLabels[$mode] ?? $mode), ENT_QUOTES, 'UTF-8') ?></option>
@@ -293,10 +293,10 @@ usort(
 
             <div class="bb-dashboard-savebar">
                 <div>
-                    <strong>Ready to create?</strong>
-                    <span>The tournament opens in detail view after creation.</span>
+                    <strong><?= $e('dashboard.ready_to_create') ?></strong>
+                    <span><?= $e('dashboard.opens_after_creation') ?></span>
                 </div>
-                <button type="submit" class="btn btn-primary">Create tournament</button>
+                <button type="submit" class="btn btn-primary"><?= $e('dashboard.create_tournament') ?></button>
             </div>
         </form>
     </section>
@@ -357,6 +357,7 @@ usort(
         var list = document.getElementById('dashboard_tournament_list');
         var emptyState = document.getElementById('dashboard_tournament_empty');
         var countLabel = document.getElementById('dashboard_tournament_count');
+        var tournamentCountLabel = <?= json_encode($t('dashboard.tournament_count'), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
         if (searchInput && list) {
             var rows = Array.prototype.slice.call(list.querySelectorAll('.bb-tournament-row'));
             var syncSearch = function () {
@@ -374,7 +375,7 @@ usort(
                     emptyState.classList.toggle('d-none', visibleCount > 0);
                 }
                 if (countLabel) {
-                    countLabel.textContent = visibleCount + ' tournament' + (visibleCount === 1 ? '' : 's');
+                    countLabel.textContent = tournamentCountLabel.replace('{count}', String(visibleCount));
                 }
             };
 

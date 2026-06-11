@@ -17,7 +17,7 @@ $final = is_array($knockoutPrint['final'] ?? null) ? $knockoutPrint['final'] : n
 $semifinalLabels = is_array($knockoutPrint['semifinal_labels'] ?? null) ? array_values($knockoutPrint['semifinal_labels']) : [];
 $note = (string) ($knockoutPrint['note'] ?? '');
 
-$renderMatchBox = static function (array $match, string $variant = '') use ($h, $formatTime, $scoreText, $scoreField, $teamLabel, $sourceLabels): void {
+$renderMatchBox = static function (array $match, string $variant = '') use ($h, $formatTime, $scoreText, $scoreField, $teamLabel, $sourceLabels, $t): void {
     $court = (int) ($match['court_number'] ?? 0);
     $plannedStart = trim((string) ($match['planned_start'] ?? ''));
     ?>
@@ -27,7 +27,7 @@ $renderMatchBox = static function (array $match, string $variant = '') use ($h, 
         <div class="bb-print-ko-team"><?= $h($teamLabel($match, 'b', $sourceLabels)) ?></div>
         <?php if ($court > 0 || $plannedStart !== ''): ?>
             <div class="bb-print-ko-meta">
-                <?= $court > 0 ? 'Court ' . $court : '' ?>
+                <?= $court > 0 ? $h($t('common.court_number', ['number' => $court])) : '' ?>
                 <?= $plannedStart !== '' ? ($court > 0 ? ' / ' : '') . $h($formatTime($plannedStart)) : '' ?>
             </div>
         <?php endif; ?>
@@ -42,17 +42,17 @@ $renderMatchBox = static function (array $match, string $variant = '') use ($h, 
 };
 
 $placeholderThirdPlace = [
-    'print_match_label' => 'Third place match',
-    'team_a_name' => $semifinalLabels[0] ?? 'Semifinal 1',
-    'team_b_name' => $semifinalLabels[1] ?? 'Semifinal 2',
+    'print_match_label' => $t('exports_print.third_place_match'),
+    'team_a_name' => $semifinalLabels[0] ?? $t('knockout.semifinal_number', ['number' => 1]),
+    'team_b_name' => $semifinalLabels[1] ?? $t('knockout.semifinal_number', ['number' => 2]),
     'team_a_source' => '',
     'team_b_source' => '',
     'status' => 'pending',
     'sets_summary_a' => 0,
     'sets_summary_b' => 0,
 ];
-$placeholderThirdPlace['team_a_name'] = 'Loser of ' . (string) $placeholderThirdPlace['team_a_name'];
-$placeholderThirdPlace['team_b_name'] = 'Loser of ' . (string) $placeholderThirdPlace['team_b_name'];
+$placeholderThirdPlace['team_a_name'] = $t('knockout.loser_of', ['match' => (string) $placeholderThirdPlace['team_a_name']]);
+$placeholderThirdPlace['team_b_name'] = $t('knockout.loser_of', ['match' => (string) $placeholderThirdPlace['team_b_name']]);
 ?>
 <section class="bb-print-section">
     <?php if ($note !== ''): ?>
@@ -60,13 +60,13 @@ $placeholderThirdPlace['team_b_name'] = 'Loser of ' . (string) $placeholderThird
     <?php endif; ?>
 
     <?php if (count($knockoutMatches) === 0): ?>
-        <div class="bb-print-empty">No knockout matches generated yet.</div>
+        <div class="bb-print-empty"><?= $h($t('print.no_knockout_matches_generated')) ?></div>
     <?php else: ?>
         <div class="bb-print-ko-board">
             <div class="bb-print-ko-side bb-print-ko-left">
                 <?php foreach ($leftRounds as $round): ?>
                     <section class="bb-print-ko-round">
-                        <h3><?= $h((string) ($round['name'] ?? 'Round')) ?></h3>
+                        <h3><?= $h((string) ($round['name'] ?? $t('knockout.round'))) ?></h3>
                         <?php foreach (($round['matches'] ?? []) as $match): ?>
                             <?php if (is_array($match)) {
                                 $renderMatchBox($match);
@@ -81,9 +81,9 @@ $placeholderThirdPlace['team_b_name'] = 'Loser of ' . (string) $placeholderThird
                     <?php $renderMatchBox($final, 'bb-print-ko-final'); ?>
                 <?php else: ?>
                     <article class="bb-print-ko-match bb-print-ko-final">
-                        <div class="bb-print-ko-label">Final</div>
-                        <div class="bb-print-ko-team">Winner of Semifinal 1</div>
-                        <div class="bb-print-ko-team">Winner of Semifinal 2</div>
+                        <div class="bb-print-ko-label"><?= $h($t('knockout.final')) ?></div>
+                        <div class="bb-print-ko-team"><?= $h($t('knockout.winner_of', ['match' => $t('knockout.semifinal_number', ['number' => 1])])) ?></div>
+                        <div class="bb-print-ko-team"><?= $h($t('knockout.winner_of', ['match' => $t('knockout.semifinal_number', ['number' => 2])])) ?></div>
                         <div class="bb-print-ko-total"><?= $scoreField('', 'bb-write-score-large') ?></div>
                         <div class="bb-print-ko-sets"><?= $scoreField('') ?> <?= $scoreField('') ?> <?= $scoreField('', 'bb-write-score-muted') ?></div>
                     </article>
@@ -94,7 +94,7 @@ $placeholderThirdPlace['team_b_name'] = 'Loser of ' . (string) $placeholderThird
             <div class="bb-print-ko-side bb-print-ko-right">
                 <?php foreach ($rightRounds as $round): ?>
                     <section class="bb-print-ko-round">
-                        <h3><?= $h((string) ($round['name'] ?? 'Round')) ?></h3>
+                        <h3><?= $h((string) ($round['name'] ?? $t('knockout.round'))) ?></h3>
                         <?php foreach (($round['matches'] ?? []) as $match): ?>
                             <?php if (is_array($match)) {
                                 $renderMatchBox($match);

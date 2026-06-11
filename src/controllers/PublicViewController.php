@@ -7,6 +7,8 @@ namespace App\Controllers;
 use App\Models\MatchModel;
 use App\Models\TeamModel;
 use App\Models\TournamentModel;
+use App\Support\Language;
+use App\Support\Translator;
 
 final class PublicViewController extends BaseController
 {
@@ -186,7 +188,7 @@ final class PublicViewController extends BaseController
         $tournament = $context['tournament'];
         $tournamentId = (int) ($tournament['id'] ?? 0);
         $screenMeta = self::SCREEN_MAP[$screenKey] ?? self::SCREEN_MAP['overview'];
-        $title = (string) ($screenMeta['title'] ?? 'Public');
+        $title = $this->publicScreenTitle($screenKey, (string) ($screenMeta['title'] ?? 'Public'));
         $enabledScreens = $this->enabledScreensOrdered($context['screens']);
         $nowDateTime = new \DateTimeImmutable('now', $this->appTimezone());
         $now = $nowDateTime->format('Y-m-d H:i');
@@ -257,6 +259,19 @@ final class PublicViewController extends BaseController
         return $payload;
     }
 
+    private function publicScreenTitle(string $screenKey, string $fallback): string
+    {
+        return match ($screenKey) {
+            'overview' => $this->translate('public.screen.overview'),
+            'next_matches' => $this->translate('public.screen.next_matches'),
+            'standings' => $this->translate('public.screen.standings'),
+            'group_schedule' => $this->translate('public.screen.group_schedule'),
+            'knockout' => $this->translate('public.screen.knockout'),
+            'recent_results' => $this->translate('public.screen.recent_results'),
+            default => $fallback,
+        };
+    }
+
     /**
      * @param list<array{key: string, label: string, path: string, is_enabled: int, sort_order: int, url: string}> $screens
      * @return list<array{key: string, label: string, path: string, is_enabled: int, sort_order: int, url: string}>
@@ -301,6 +316,10 @@ final class PublicViewController extends BaseController
         }
 
         $config = $this->services['config'] ?? [];
+        $currentLanguage = Language::resolve();
+        $translator = new Translator($currentLanguage);
+        $t = fn (string $key, array $params = []): string => $translator->translate($key, $params);
+        $e = fn (string $key, array $params = []): string => htmlspecialchars($translator->translate($key, $params), ENT_QUOTES, 'UTF-8');
         $url = fn (string $path = '/'): string => $this->url($path);
         extract($data, EXTR_SKIP);
         require __DIR__ . '/../Views/public/layout.php';

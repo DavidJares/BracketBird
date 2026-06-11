@@ -117,6 +117,10 @@ No frontend build pipeline is required.
 Admin pages support a browser-local dark/light theme preference stored in `localStorage`.
 Public screens use the tournament-specific `public_view_theme` setting so a tournament can choose either the dark broadcast theme or a lighter outdoor-friendly theme independently from the admin UI.
 
+Admin pages include a compact language selector in the top bar. The selected language is stored in the `bracketbird_lang` cookie, supports `en` and `cs`, falls back to English for unsupported values, and defaults to Czech only when no cookie exists and the browser `Accept-Language` header starts with `cs`. This first language pass only adds preference handling and selector-related translation scaffolding; the full UI string migration is intentionally left for a later step.
+
+The main server-rendered UI now reads labels from `resources/lang/en.json` and `resources/lang/cs.json`, including admin navigation, tournament setup, team/group management, match control, public display settings, public screens, and print outputs. English is the source language; Czech uses matching keys and falls back through English when a key is missing.
+
 The Tournament Settings admin tab uses a responsive product-style configuration layout with themed cards for general information, tournament structure, match rules, access, and the save action bar while preserving the existing server-rendered form behavior.
 
 The Teams & Groups admin area uses a responsive workspace layout with roster metrics, add-team controls, balanced assignment, unassigned-team handling, group cards, compact reassignment rows, and inline edit/delete actions while keeping the existing PHP form submissions.

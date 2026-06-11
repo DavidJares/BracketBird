@@ -11,7 +11,7 @@ $tournamentId = (int) ($tournament['id'] ?? 0);
 $advancingTeamsCount = (int) ($tournament['advancing_teams_count'] ?? 0);
 $hasExistingKnockoutMatches = isset($hasKnockoutMatches) && $hasKnockoutMatches;
 $generateConfirmMessage = $hasExistingKnockoutMatches
-    ? "return confirm('Existing knockout matches will be replaced. Continue?');"
+    ? 'return confirm(' . htmlspecialchars(json_encode($t('knockout.existing_replace_confirm')), ENT_QUOTES, 'UTF-8') . ');'
     : '';
 
 $nextPowerOfTwo = static function (int $value): int {
@@ -139,7 +139,7 @@ $statusClassFor = static function (string $status): string {
     };
 };
 
-$statusLabelFor = static fn (string $status): string => ucwords(str_replace('_', ' ', $status !== '' ? $status : 'pending'));
+$statusLabelFor = static fn (string $status): string => $t('match_status.' . ($status !== '' ? $status : 'pending'));
 
 $courtBadgeClassFor = static function (int $courtNumber) use ($courtBadgeClasses): string {
     if ($courtNumber <= 0) {
@@ -152,7 +152,7 @@ $courtBadgeClassFor = static function (int $courtNumber) use ($courtBadgeClasses
 $estimatedStartFor = static function (array $match): string {
     $estimatedStartRaw = trim((string) ($match['planned_start'] ?? ''));
     if ($estimatedStartRaw === '') {
-        return 'TBD';
+        return $t('common.tbd');
     }
 
     $estimatedDateTime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $estimatedStartRaw);
@@ -163,14 +163,14 @@ $estimatedStartFor = static function (array $match): string {
     return $estimatedStartRaw;
 };
 
-$sourceLabelFor = static function (string $source) use ($sourceLabelByCode): string {
+$sourceLabelFor = static function (string $source) use ($sourceLabelByCode, $t): string {
     $source = trim($source);
     if ($source === '') {
         return '';
     }
 
     if (isset($sourceLabelByCode[$source])) {
-        return 'Winner of ' . $sourceLabelByCode[$source];
+        return $t('knockout.winner_of', ['match' => $sourceLabelByCode[$source]]);
     }
 
     if (strcasecmp($source, 'bye') === 0) {
@@ -178,31 +178,32 @@ $sourceLabelFor = static function (string $source) use ($sourceLabelByCode): str
     }
 
     if (preg_match('/^winner:r(\d+):m(\d+)$/', $source, $matches) === 1) {
-        return 'Winner of Match ' . (string) ((int) ($matches[2] ?? 0));
+        return $t('knockout.winner_of_match', ['number' => (int) ($matches[2] ?? 0)]);
     }
 
-    return 'Pending qualifier';
+    return $t('knockout.pending_qualifier');
 };
 
-$teamViewData = static function (array $match, string $side) use ($sourceLabelFor): array {
+$tbdLabel = $t('common.tbd');
+$teamViewData = static function (array $match, string $side) use ($sourceLabelFor, $tbdLabel): array {
     $teamKey = $side === 'a' ? 'team_a_name' : 'team_b_name';
     $sourceKey = $side === 'a' ? 'team_a_source' : 'team_b_source';
     $teamName = trim((string) ($match[$teamKey] ?? ''));
     $sourceLabel = $sourceLabelFor((string) ($match[$sourceKey] ?? ''));
 
     return [
-        'name' => $teamName !== '' ? $teamName : 'TBD',
+        'name' => $teamName !== '' ? $teamName : $tbdLabel,
         'source' => $sourceLabel,
         'is_pending' => $teamName === '',
     ];
 };
 
-$renderTeamRow = static function (array $team, bool $isWinner, string $className = 'bb-ko-team-row'): void {
+$renderTeamRow = static function (array $team, bool $isWinner, string $className = 'bb-ko-team-row') use ($e): void {
     ?>
     <div class="<?= htmlspecialchars($className, ENT_QUOTES, 'UTF-8') ?><?= $isWinner ? ' is-winner' : '' ?><?= !empty($team['is_pending']) ? ' is-pending' : '' ?>">
-        <span class="bb-ko-team-name"><?= htmlspecialchars((string) ($team['name'] ?? 'TBD'), ENT_QUOTES, 'UTF-8') ?></span>
+        <span class="bb-ko-team-name"><?= htmlspecialchars((string) ($team['name'] ?? $e('common.tbd')), ENT_QUOTES, 'UTF-8') ?></span>
         <?php if ($isWinner): ?>
-            <span class="bb-winner-badge">W</span>
+            <span class="bb-winner-badge"><?= $e('common.winner_short') ?></span>
         <?php endif; ?>
     </div>
     <?php if ((string) ($team['source'] ?? '') !== ''): ?>
@@ -215,41 +216,41 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
 <section class="bb-knockout-shell">
     <header class="bb-workspace-header bb-knockout-header">
         <div>
-            <span class="bb-section-kicker">Elimination bracket</span>
-            <h2>Knockout</h2>
-            <p>Generate, review and manage elimination bracket.</p>
+            <span class="bb-section-kicker"><?= $e('knockout.elimination_bracket') ?></span>
+            <h2><?= $e('knockout.title') ?></h2>
+            <p><?= $e('knockout.subtitle') ?></p>
         </div>
         <div class="bb-knockout-meta">
-            <span><?= $advancingTeamsCount ?> advancing</span>
-            <span><?= $bracketSize > 0 ? $bracketSize : '-' ?> bracket</span>
-            <span><?= $byeCount > 0 ? ($byeCount . ' BYE' . ($byeCount === 1 ? '' : 's')) : 'No BYEs' ?></span>
+            <span><?= $e('knockout.advancing_count', ['count' => $advancingTeamsCount]) ?></span>
+            <span><?= $bracketSize > 0 ? $e('knockout.bracket_size', ['size' => $bracketSize]) : '-' ?></span>
+            <span><?= $byeCount > 0 ? $e('knockout.bye_count', ['count' => $byeCount]) : $e('knockout.no_byes') ?></span>
         </div>
     </header>
 
     <section class="bb-knockout-toolbar">
         <div class="bb-knockout-action-copy">
-            <span class="bb-section-kicker">Generate</span>
-            <h3>Knockout Stage</h3>
-            <p>Build the elimination bracket from advancing teams. Non-power-of-two fields use BYEs for top seeds.</p>
+            <span class="bb-section-kicker"><?= $e('knockout.generate') ?></span>
+            <h3><?= $e('knockout.stage') ?></h3>
+            <p><?= $e('knockout.generate_help') ?></p>
 
             <div class="bb-knockout-alerts">
                 <?php if ($hasExistingKnockoutMatches): ?>
                     <div class="alert alert-warning py-2 mb-0 small" role="alert">
-                        Knockout matches already exist. Generation will replace knockout matches only.
+                        <?= $e('knockout.existing_generation_warning') ?>
                     </div>
                 <?php endif; ?>
                 <?php if ($groupStageMatchCount <= 0): ?>
                     <div class="alert alert-warning py-2 mb-0 small" role="alert">
-                        Generate and finish group-stage matches before creating the knockout bracket.
+                        <?= $e('knockout.finish_group_stage_first') ?>
                     </div>
                 <?php elseif ($unfinishedGroupMatchCount > 0): ?>
                     <div class="alert alert-warning py-2 mb-0 small" role="alert">
-                        Group stage must be finished before generation. <?= $unfinishedGroupMatchCount ?> match<?= $unfinishedGroupMatchCount === 1 ? '' : 'es' ?> still need a final result.
+                        <?= $e('knockout.unfinished_group_matches', ['count' => $unfinishedGroupMatchCount]) ?>
                     </div>
                 <?php endif; ?>
                 <?php if ($advancingTeamsCount <= 1): ?>
                     <div class="alert alert-warning py-2 mb-0 small" role="alert">
-                        Knockout generation requires at least 2 advancing teams.
+                        <?= $e('knockout.requires_two_advancing') ?>
                     </div>
                 <?php endif; ?>
             </div>
@@ -258,15 +259,15 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
         <div class="bb-knockout-action-panel">
             <div class="bb-knockout-stats">
                 <div>
-                    <span>Matches</span>
+                    <span><?= $e('group_stage.matches') ?></span>
                     <strong><?= $matchCount ?></strong>
                 </div>
                 <div>
-                    <span>Finished</span>
+                    <span><?= $e('match_status.finished') ?></span>
                     <strong><?= $finishedMatchCount ?></strong>
                 </div>
                 <div>
-                    <span>Pending</span>
+                    <span><?= $e('match_status.pending') ?></span>
                     <strong><?= $pendingMatchCount ?></strong>
                 </div>
             </div>
@@ -276,35 +277,35 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                 <?php if ($hasExistingKnockoutMatches): ?>
                     <input type="hidden" name="confirm_regenerate" value="1">
                 <?php endif; ?>
-                <button type="submit" class="btn btn-primary w-100">Generate knockout stage</button>
+                <button type="submit" class="btn btn-primary w-100"><?= $e('knockout.generate_stage') ?></button>
             </form>
         </div>
     </section>
 
     <div class="bb-knockout-viewbar">
         <div>
-            <span class="bb-section-kicker">Workspace</span>
-            <strong><?= $knockoutView === 'bracket' ? 'Bracket View' : 'Table View' ?></strong>
+            <span class="bb-section-kicker"><?= $e('knockout.workspace') ?></span>
+            <strong><?= $knockoutView === 'bracket' ? $e('knockout.bracket_view') : $e('knockout.table_view') ?></strong>
         </div>
-        <div class="bb-view-switcher" role="group" aria-label="Knockout view">
-            <a href="<?= htmlspecialchars($tableViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'table' ? 'active' : '' ?>">Table View</a>
-            <a href="<?= htmlspecialchars($bracketViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'bracket' ? 'active' : '' ?>">Bracket View</a>
+        <div class="bb-view-switcher" role="group" aria-label="<?= $e('knockout.view') ?>">
+            <a href="<?= htmlspecialchars($tableViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'table' ? 'active' : '' ?>"><?= $e('knockout.table_view') ?></a>
+            <a href="<?= htmlspecialchars($bracketViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'bracket' ? 'active' : '' ?>"><?= $e('knockout.bracket_view') ?></a>
         </div>
     </div>
 
     <section class="bb-knockout-board">
         <?php if ($matchCount === 0): ?>
             <div class="bb-empty-state">
-                No knockout matches generated yet. Generate the knockout stage after group-stage results are complete.
+                <?= $e('knockout.no_matches_generated') ?>
             </div>
         <?php elseif ($knockoutView === 'bracket'): ?>
-            <div class="bb-bracket-hint">Swipe horizontally to view bracket</div>
-            <div class="bb-bracket-board" aria-label="Knockout bracket">
+            <div class="bb-bracket-hint"><?= $e('knockout.swipe_hint') ?></div>
+            <div class="bb-bracket-board" aria-label="<?= $e('knockout.bracket') ?>">
                 <div class="bb-bracket-grid">
                     <?php foreach ($rounds as $roundName => $roundMatches): ?>
                         <section class="bb-bracket-round">
                             <div class="bb-bracket-round-title">
-                                <span><?= htmlspecialchars($roundName !== '' ? $roundName : 'Round', ENT_QUOTES, 'UTF-8') ?></span>
+                                <span><?= htmlspecialchars($roundName !== '' ? $roundName : $t('knockout.round'), ENT_QUOTES, 'UTF-8') ?></span>
                                 <strong><?= count($roundMatches) ?></strong>
                             </div>
                             <?php foreach ($roundMatches as $roundRow): ?>
@@ -332,8 +333,8 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                                 <article class="bb-bracket-match-card bb-bracket-match-<?= htmlspecialchars(str_replace('_', '-', $status), ENT_QUOTES, 'UTF-8') ?><?= $detailUrl !== '' ? ' js-match-row' : '' ?>"<?= $detailUrl !== '' ? ' data-href="' . htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
                                     <div class="bb-bracket-match-header">
                                         <div>
-                                            <span><?= htmlspecialchars((string) ($matchLabelsByIndex[$index] ?? 'Match'), ENT_QUOTES, 'UTF-8') ?></span>
-                                            <strong><?= htmlspecialchars($roundName !== '' ? $roundName : 'Round', ENT_QUOTES, 'UTF-8') ?></strong>
+                                            <span><?= htmlspecialchars((string) ($matchLabelsByIndex[$index] ?? $t('print.match')), ENT_QUOTES, 'UTF-8') ?></span>
+                                            <strong><?= htmlspecialchars($roundName !== '' ? $roundName : $t('knockout.round'), ENT_QUOTES, 'UTF-8') ?></strong>
                                         </div>
                                         <span class="badge <?= htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8') ?></span>
                                     </div>
@@ -344,7 +345,7 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                                     </div>
 
                                     <div class="bb-bracket-match-footer">
-                                        <span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $courtNumber > 0 ? ('Court ' . $courtNumber) : 'Court TBD' ?></span>
+                                        <span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $courtNumber > 0 ? $e('common.court_number', ['number' => $courtNumber]) : $e('knockout.court_tbd') ?></span>
                                         <span><?= htmlspecialchars($estimatedStartDisplay, ENT_QUOTES, 'UTF-8') ?></span>
                                     </div>
 
@@ -377,14 +378,14 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                     </colgroup>
                     <thead>
                     <tr>
-                        <th>Match / Round</th>
-                        <th>Team A</th>
-                        <th>Team B</th>
-                        <th>Court</th>
-                        <th>Start</th>
-                        <th>Result</th>
-                        <th>Status</th>
-                        <th>Action</th>
+                        <th><?= $e('knockout.match_round') ?></th>
+                        <th><?= $e('print.team_a') ?></th>
+                        <th><?= $e('print.team_b') ?></th>
+                        <th><?= $e('print.court') ?></th>
+                        <th><?= $e('print.start') ?></th>
+                        <th><?= $e('print.result') ?></th>
+                        <th><?= $e('common.status') ?></th>
+                        <th><?= $e('common.action') ?></th>
                     </tr>
                     </thead>
                     <tbody>
@@ -413,14 +414,14 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                         <tr<?= $detailUrl !== '' ? ' class="js-match-row" data-href="' . htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
                             <td>
                                 <div class="bb-ko-match-cell">
-                                    <strong><?= htmlspecialchars((string) ($matchLabelsByIndex[$index] ?? 'Match'), ENT_QUOTES, 'UTF-8') ?></strong>
-                                    <span><?= htmlspecialchars($roundName !== '' ? $roundName : 'Round', ENT_QUOTES, 'UTF-8') ?></span>
+                                    <strong><?= htmlspecialchars((string) ($matchLabelsByIndex[$index] ?? $t('print.match')), ENT_QUOTES, 'UTF-8') ?></strong>
+                                    <span><?= htmlspecialchars($roundName !== '' ? $roundName : $t('knockout.round'), ENT_QUOTES, 'UTF-8') ?></span>
                                 </div>
                             </td>
                             <td><?php $renderTeamRow($teamA, $isWinnerA); ?></td>
                             <td><?php $renderTeamRow($teamB, $isWinnerB); ?></td>
                             <td>
-                                <span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $courtNumber > 0 ? ('Court ' . $courtNumber) : 'TBD' ?></span>
+                                <span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $courtNumber > 0 ? $e('common.court_number', ['number' => $courtNumber]) : $e('common.tbd') ?></span>
                             </td>
                             <td><?= htmlspecialchars($estimatedStartDisplay, ENT_QUOTES, 'UTF-8') ?></td>
                             <td>
@@ -434,7 +435,7 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                             <td><span class="badge <?= htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8') ?></span></td>
                             <td>
                                 <?php if ($detailUrl !== ''): ?>
-                                    <a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm">Open</a>
+                                    <a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm"><?= $e('common.open') ?></a>
                                 <?php else: ?>
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
@@ -468,7 +469,7 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                     ?>
                     <article class="bb-admin-match-card<?= $detailUrl !== '' ? ' js-match-row' : '' ?>"<?= $detailUrl !== '' ? ' data-href="' . htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
                         <div class="bb-admin-match-card-top">
-                            <strong><?= htmlspecialchars((string) ($matchLabelsByIndex[$index] ?? 'Match'), ENT_QUOTES, 'UTF-8') ?></strong>
+                            <strong><?= htmlspecialchars((string) ($matchLabelsByIndex[$index] ?? $t('print.match')), ENT_QUOTES, 'UTF-8') ?></strong>
                             <span class="badge <?= htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8') ?></span>
                         </div>
                         <div class="bb-bracket-team-list">
@@ -476,16 +477,16 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
                             <?php $renderTeamRow($teamB, $isWinnerB, 'bb-bracket-team-row'); ?>
                         </div>
                         <div class="bb-admin-match-card-meta">
-                            <div><span>Court</span><strong><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $courtNumber > 0 ? ('Court ' . $courtNumber) : 'TBD' ?></span></strong></div>
-                            <div><span>Start</span><strong><?= htmlspecialchars($estimatedStartDisplay, ENT_QUOTES, 'UTF-8') ?></strong></div>
-                            <div><span>Result</span><strong><?= htmlspecialchars($status === 'finished' ? ($setsSummaryA . ':' . $setsSummaryB) : '-', ENT_QUOTES, 'UTF-8') ?></strong></div>
+                            <div><span><?= $e('print.court') ?></span><strong><span class="badge <?= htmlspecialchars($courtBadgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= $courtNumber > 0 ? $e('common.court_number', ['number' => $courtNumber]) : $e('common.tbd') ?></span></strong></div>
+                            <div><span><?= $e('print.start') ?></span><strong><?= htmlspecialchars($estimatedStartDisplay, ENT_QUOTES, 'UTF-8') ?></strong></div>
+                            <div><span><?= $e('print.result') ?></span><strong><?= htmlspecialchars($status === 'finished' ? ($setsSummaryA . ':' . $setsSummaryB) : '-', ENT_QUOTES, 'UTF-8') ?></strong></div>
                         </div>
                         <?php if ($status === 'finished' && $setScoresSummary !== ''): ?>
                             <div class="bb-ko-result mt-2"><span><?= htmlspecialchars($setScoresSummary, ENT_QUOTES, 'UTF-8') ?></span></div>
                         <?php endif; ?>
                         <?php if ($detailUrl !== ''): ?>
                             <div class="bb-admin-match-card-action">
-                                <a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm">Open match</a>
+                                <a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm"><?= $e('common.open_match') ?></a>
                             </div>
                         <?php endif; ?>
                     </article>

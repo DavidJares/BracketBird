@@ -9,19 +9,19 @@ declare(strict_types=1);
 /** @var array<string, string> $sectionNav */
 
 $sectionLabels = [
-    'tournament' => 'Tournament',
-    'groups' => 'Teams & Groups',
-    'matches' => 'Group Stage',
-    'knockout' => 'Knockout',
-    'public_view' => 'Public View',
-    'teams' => 'Teams',
-    'exports' => 'Exports & Print',
+    'tournament' => 'nav.tournament',
+    'groups' => 'nav.teams_groups',
+    'matches' => 'nav.group_stage',
+    'knockout' => 'nav.knockout',
+    'public_view' => 'nav.public_view',
+    'teams' => 'nav.teams',
+    'exports' => 'nav.exports_print',
 ];
 ?>
 <div class="bb-page-header">
     <div>
-        <div class="bb-page-kicker">Admin console</div>
-        <h1>Tournament detail</h1>
+        <div class="bb-page-kicker"><?= $e('admin.admin_console') ?></div>
+        <h1><?= $e('admin.tournament_detail') ?></h1>
     </div>
     <?php if ($backUrl !== null): ?>
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm"><?= htmlspecialchars($backLabel, ENT_QUOTES, 'UTF-8') ?></a>
@@ -33,7 +33,7 @@ $sectionLabels = [
         <?php $href = (string) ($sectionNav[$sectionKey] ?? '#'); ?>
         <li class="nav-item">
             <a class="nav-link <?= $activeSection === $sectionKey ? 'active' : '' ?>" href="<?= htmlspecialchars($href, ENT_QUOTES, 'UTF-8') ?>">
-                <?= htmlspecialchars($sectionLabel, ENT_QUOTES, 'UTF-8') ?>
+                <?= $e($sectionLabel) ?>
             </a>
         </li>
     <?php endforeach; ?>

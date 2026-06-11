@@ -32,34 +32,34 @@ ksort($matchesByCourt);
 ?>
 <?php if (count($matchesByCourt) === 0): ?>
     <section class="print-page bb-print-page bb-print-section">
-        <?php $renderPrintHeader('Schedule by Court'); ?>
-        <div class="bb-print-empty">No court schedule is available yet.</div>
+        <?php $renderPrintHeader($t('print.schedule_by_court')); ?>
+        <div class="bb-print-empty"><?= $h($t('print.no_court_schedule')) ?></div>
     </section>
 <?php endif; ?>
 <?php $courtPageIndex = 0; ?>
 <?php foreach ($matchesByCourt as $court => $courtMatches): ?>
     <?php if ($courtPageIndex > 0): ?>
-        <div class="print-page-separator" aria-hidden="true"><span>End of printed page</span></div>
+        <div class="print-page-separator" aria-hidden="true"><span><?= $h($t('print.end_of_printed_page')) ?></span></div>
     <?php endif; ?>
     <section class="print-page bb-print-page bb-print-section <?= $courtPageIndex > 0 ? 'bb-print-page-break' : '' ?>">
-        <?php $renderPrintHeader('Court ' . (int) $court); ?>
+        <?php $renderPrintHeader($t('common.court_number', ['number' => (int) $court])); ?>
         <table class="bb-print-table bb-print-schedule-table">
             <thead>
             <tr>
-                <th>Time</th>
-                <th>Stage</th>
-                <th>Group/Round</th>
-                <th>Team A</th>
-                <th>Team B</th>
-                <th>Result</th>
-                <th>Set 1</th>
-                <th>Set 2</th>
-                <th>Set 3</th>
+                <th><?= $h($t('print.time')) ?></th>
+                <th><?= $h($t('print.stage')) ?></th>
+                <th><?= $h($t('print.group_round')) ?></th>
+                <th><?= $h($t('print.team_a')) ?></th>
+                <th><?= $h($t('print.team_b')) ?></th>
+                <th><?= $h($t('print.result')) ?></th>
+                <th><?= $h($t('print.set_1')) ?></th>
+                <th><?= $h($t('print.set_2')) ?></th>
+                <th><?= $h($t('print.set_3')) ?></th>
             </tr>
             </thead>
             <tbody>
             <?php if (count($courtMatches) === 0): ?>
-                <tr><td colspan="9" class="bb-print-empty">No matches assigned to this court.</td></tr>
+                <tr><td colspan="9" class="bb-print-empty"><?= $h($t('print.no_matches_assigned_to_court')) ?></td></tr>
             <?php endif; ?>
             <?php foreach ($courtMatches as $match): ?>
                 <tr>

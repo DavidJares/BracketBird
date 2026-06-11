@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-$pageTitle = isset($title) && is_string($title) ? $title : 'Public View';
+$pageTitle = isset($title) && is_string($title) ? $title : $t('public_view.title');
 $publicViewTheme = is_array($tournament ?? null) ? (string) ($tournament['public_view_theme'] ?? 'dark') : 'dark';
 if (!in_array($publicViewTheme, ['dark', 'light'], true)) {
     $publicViewTheme = 'dark';
 }
 ?>
 <!doctype html>
-<html lang="en" class="bb-theme-<?= htmlspecialchars($publicViewTheme, ENT_QUOTES, 'UTF-8') ?>">
+<html lang="<?= htmlspecialchars($currentLanguage ?? 'en', ENT_QUOTES, 'UTF-8') ?>" class="bb-theme-<?= htmlspecialchars($publicViewTheme, ENT_QUOTES, 'UTF-8') ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">

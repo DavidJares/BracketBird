@@ -7,6 +7,8 @@ namespace App\Controllers;
 use App\Models\MatchModel;
 use App\Models\TeamModel;
 use App\Models\TournamentModel;
+use App\Support\Language;
+use App\Support\Translator;
 use DateInterval;
 use DateTimeImmutable;
 use Throwable;
@@ -902,11 +904,11 @@ final class TournamentController extends BaseController
     private function printOutputMeta(string $printType): array
     {
         return match ($printType) {
-            'schedule_by_court' => ['title' => 'Schedule by Court'],
-            'schedule_by_group' => ['title' => 'Schedule by Group'],
-            'group_matrix' => ['title' => 'Group Round Robin Matrix'],
-            'knockout' => ['title' => 'Knockout Bracket'],
-            default => ['title' => 'Full Match Schedule'],
+            'schedule_by_court' => ['title' => $this->translate('print.schedule_by_court')],
+            'schedule_by_group' => ['title' => $this->translate('print.schedule_by_group')],
+            'group_matrix' => ['title' => $this->translate('print.group_round_robin_matrix')],
+            'knockout' => ['title' => $this->translate('exports_print.knockout_bracket')],
+            default => ['title' => $this->translate('exports_print.full_match_schedule')],
         };
     }
 
@@ -921,6 +923,10 @@ final class TournamentController extends BaseController
         }
 
         $config = $this->services['config'] ?? [];
+        $currentLanguage = Language::resolve();
+        $translator = new Translator($currentLanguage);
+        $t = fn (string $key, array $params = []): string => $translator->translate($key, $params);
+        $e = fn (string $key, array $params = []): string => htmlspecialchars($translator->translate($key, $params), ENT_QUOTES, 'UTF-8');
         $url = fn (string $path = '/'): string => $this->url($path);
         extract($data, EXTR_SKIP);
         require __DIR__ . '/../Views/admin/print/layout.php';

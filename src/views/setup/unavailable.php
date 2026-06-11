@@ -8,5 +8,5 @@ declare(strict_types=1);
     <?= htmlspecialchars($message, ENT_QUOTES, 'UTF-8') ?>
 </div>
 <div>
-    <a href="<?= htmlspecialchars($url('/'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary">Back</a>
+    <a href="<?= htmlspecialchars($url('/'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary"><?= $e('common.back') ?></a>
 </div>

@@ -36,8 +36,8 @@ foreach ($groupStandingsByGroup as $groupId => $rows) {
 ?>
 <?php if (count($groups) === 0): ?>
     <section class="print-page bb-print-page bb-print-section">
-        <?php $renderPrintHeader('Group Matrix'); ?>
-        <div class="bb-print-empty">No groups are available yet.</div>
+        <?php $renderPrintHeader($t('print.group_round_robin_matrix')); ?>
+        <div class="bb-print-empty"><?= $h($t('print.no_groups_available')) ?></div>
     </section>
 <?php endif; ?>
 <?php $matrixPageIndex = 0; ?>
@@ -48,22 +48,22 @@ foreach ($groupStandingsByGroup as $groupId => $rows) {
     $teamsInGroup = array_values($groupAssignment['grouped_teams'][$groupId] ?? []);
     ?>
     <?php if ($matrixPageIndex > 0): ?>
-        <div class="print-page-separator" aria-hidden="true"><span>End of printed page</span></div>
+        <div class="print-page-separator" aria-hidden="true"><span><?= $h($t('print.end_of_printed_page')) ?></span></div>
     <?php endif; ?>
     <section class="print-page bb-print-page bb-print-section <?= $matrixPageIndex > 0 ? 'bb-print-page-break' : '' ?>">
-        <?php $renderPrintHeader('Group ' . $groupName); ?>
+        <?php $renderPrintHeader($t('teams_groups.group_name', ['name' => $groupName])); ?>
         <?php if (count($teamsInGroup) === 0): ?>
-            <div class="bb-print-empty">No teams assigned to this group.</div>
+            <div class="bb-print-empty"><?= $h($t('print.no_teams_assigned_to_group')) ?></div>
         <?php else: ?>
             <table class="bb-print-table bb-print-matrix-table bb-print-matrix-size-<?= count($teamsInGroup) ?>">
                 <thead>
                 <tr>
-                    <th>Team</th>
+                    <th><?= $h($t('print.team')) ?></th>
                     <?php foreach ($teamsInGroup as $columnTeam): ?>
                         <th><?= $h((string) ($columnTeam['team_name'] ?? '-')) ?></th>
                     <?php endforeach; ?>
-                    <th>Points</th>
-                    <th>Rank</th>
+                    <th><?= $h($t('print.points')) ?></th>
+                    <th><?= $h($t('print.rank')) ?></th>
                 </tr>
                 </thead>
                 <tbody>

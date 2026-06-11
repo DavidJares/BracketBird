@@ -26,9 +26,9 @@ $groupCount = (int) $groupAssignment['group_count'];
 $unassignedCount = (int) $groupAssignment['unassigned_count'];
 $assignedCount = max(0, $totalTeams - $unassignedCount);
 
-$renderAssignmentOptions = static function (array $groups, ?int $selectedGroupId): void {
+$renderAssignmentOptions = static function (array $groups, ?int $selectedGroupId) use ($e): void {
     ?>
-    <option value="" <?= $selectedGroupId === null ? 'selected' : '' ?>>No group</option>
+    <option value="" <?= $selectedGroupId === null ? 'selected' : '' ?>><?= $e('teams_groups.no_group') ?></option>
     <?php foreach ($groups as $optionGroup): ?>
         <?php $optionId = (int) ($optionGroup['id'] ?? 0); ?>
         <option value="<?= $optionId ?>" <?= $selectedGroupId === $optionId ? 'selected' : '' ?>>
@@ -47,7 +47,7 @@ $renderTeamCard = static function (
     string $updateTeamActionUrl,
     string $deleteTeamActionUrl,
     callable $renderAssignmentOptions
-): void {
+) use ($e, $t): void {
     $teamId = (int) ($team['id'] ?? 0);
     $teamName = (string) ($team['team_name'] ?? '');
     $description = (string) ($team['description'] ?? '');
@@ -60,7 +60,7 @@ $renderTeamCard = static function (
             }
         }
     }
-    $assignmentLabel = $selectedGroupId === null ? 'Unassigned' : ('Group ' . $groupName);
+    $assignmentLabel = $selectedGroupId === null ? $t('teams_groups.unassigned') : $t('teams_groups.group_name', ['name' => $groupName]);
     $editPanelId = 'team-edit-panel-' . $teamId;
     ?>
     <article class="bb-team-item <?= $selectedGroupId === null ? 'bb-team-item-unassigned' : '' ?>">
@@ -78,21 +78,21 @@ $renderTeamCard = static function (
             </div>
 
             <div class="bb-team-actions">
-                <button type="button" class="btn btn-sm btn-outline-secondary bb-team-edit-toggle" data-team-edit-target="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" aria-controls="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" aria-expanded="false">Edit</button>
-                <form method="post" action="<?= htmlspecialchars($deleteTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm('Delete this team?');" class="bb-team-delete-form">
+                <button type="button" class="btn btn-sm btn-outline-secondary bb-team-edit-toggle" data-team-edit-target="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" aria-controls="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" aria-expanded="false"><?= $e('common.edit') ?></button>
+                <form method="post" action="<?= htmlspecialchars($deleteTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('teams.delete_team_confirm')), ENT_QUOTES, 'UTF-8') ?>);" class="bb-team-delete-form">
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                     <input type="hidden" name="team_id" value="<?= $teamId ?>">
                     <input type="hidden" name="confirm_delete" value="1">
                     <input type="hidden" name="return_section" value="groups">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                    <button type="submit" class="btn btn-sm btn-outline-danger"><?= $e('common.delete') ?></button>
                 </form>
             </div>
         </div>
 
         <div id="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" class="bb-team-edit-panel" hidden>
             <div class="bb-team-edit-panel-header">
-                <strong>Edit team</strong>
-                <button type="button" class="btn btn-sm btn-outline-secondary bb-team-edit-cancel" data-team-edit-target="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>">Cancel</button>
+                <strong><?= $e('teams.edit_team') ?></strong>
+                <button type="button" class="btn btn-sm btn-outline-secondary bb-team-edit-cancel" data-team-edit-target="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>"><?= $e('common.cancel') ?></button>
             </div>
 
             <form method="post" action="<?= htmlspecialchars($updateTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-team-edit-form">
@@ -100,14 +100,14 @@ $renderTeamCard = static function (
                 <input type="hidden" name="team_id" value="<?= $teamId ?>">
                 <input type="hidden" name="return_section" value="groups">
                 <div>
-                    <label class="form-label">Team name</label>
+                    <label class="form-label"><?= $e('teams.team_name') ?></label>
                     <input type="text" name="team_name" class="form-control form-control-sm" required maxlength="150" value="<?= htmlspecialchars($teamName, ENT_QUOTES, 'UTF-8') ?>">
                 </div>
                 <div>
-                    <label class="form-label">Description</label>
+                    <label class="form-label"><?= $e('teams.description') ?></label>
                     <textarea name="description" class="form-control form-control-sm" rows="2" maxlength="1000"><?= htmlspecialchars($description, ENT_QUOTES, 'UTF-8') ?></textarea>
                 </div>
-                <button type="submit" class="btn btn-sm btn-primary">Save details</button>
+                <button type="submit" class="btn btn-sm btn-primary"><?= $e('teams.save_details') ?></button>
             </form>
 
             <form method="post" action="<?= htmlspecialchars($assignTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-team-assignment-form">
@@ -115,12 +115,12 @@ $renderTeamCard = static function (
                 <input type="hidden" name="team_id" value="<?= $teamId ?>">
                 <input type="hidden" name="return_section" value="groups">
                 <div>
-                    <label class="form-label">Group assignment</label>
-                    <select name="group_id" class="form-select form-select-sm" aria-label="Assign <?= htmlspecialchars($teamName, ENT_QUOTES, 'UTF-8') ?> to group">
+                    <label class="form-label"><?= $e('teams_groups.group_assignment') ?></label>
+                    <select name="group_id" class="form-select form-select-sm" aria-label="<?= $e('teams_groups.assign_team_to_group', ['team' => $teamName]) ?>">
                         <?php $renderAssignmentOptions($groups, $selectedGroupId); ?>
                     </select>
                 </div>
-                <button type="submit" class="btn btn-sm btn-primary">Save group</button>
+                <button type="submit" class="btn btn-sm btn-primary"><?= $e('teams_groups.save_group') ?></button>
             </form>
         </div>
     </article>
@@ -130,27 +130,27 @@ $renderTeamCard = static function (
 <div class="bb-workspace bb-teams-workspace">
     <header class="bb-workspace-header">
         <div>
-            <div class="bb-page-kicker">Preparation</div>
-            <h2>Teams &amp; Groups</h2>
-            <p>Manage participants and group assignments before match generation.</p>
+            <div class="bb-page-kicker"><?= $e('teams_groups.preparation') ?></div>
+            <h2><?= $e('teams_groups.title') ?></h2>
+            <p><?= $e('teams_groups.subtitle') ?></p>
         </div>
     </header>
 
-    <section class="bb-metric-grid" aria-label="Team and group summary">
+    <section class="bb-metric-grid" aria-label="<?= $e('teams_groups.summary') ?>">
         <div class="bb-metric-card">
-            <span>Total teams</span>
+            <span><?= $e('teams_groups.total_teams') ?></span>
             <strong><?= $totalTeams ?></strong>
         </div>
         <div class="bb-metric-card">
-            <span>Groups</span>
+            <span><?= $e('teams_groups.groups') ?></span>
             <strong><?= $groupCount ?></strong>
         </div>
         <div class="bb-metric-card">
-            <span>Assigned</span>
+            <span><?= $e('teams_groups.assigned') ?></span>
             <strong><?= $assignedCount ?></strong>
         </div>
         <div class="bb-metric-card <?= $unassignedCount > 0 ? 'bb-metric-card-warning' : '' ?>">
-            <span>Unassigned</span>
+            <span><?= $e('teams_groups.unassigned') ?></span>
             <strong><?= $unassignedCount ?></strong>
         </div>
     </section>
@@ -160,39 +160,39 @@ $renderTeamCard = static function (
             <section class="bb-action-card">
                 <div class="bb-workspace-card-header">
                     <div>
-                        <span class="bb-settings-eyebrow">Add participant</span>
-                        <h3>Add Team</h3>
+                        <span class="bb-settings-eyebrow"><?= $e('teams.add_participant') ?></span>
+                        <h3><?= $e('teams.add_team') ?></h3>
                     </div>
                 </div>
                 <form method="post" action="<?= htmlspecialchars($createTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-stack-form">
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                     <input type="hidden" name="return_section" value="groups">
                     <div>
-                        <label for="team_name_new" class="form-label">Team name</label>
+                        <label for="team_name_new" class="form-label"><?= $e('teams.team_name') ?></label>
                         <input type="text" name="team_name" id="team_name_new" class="form-control" required maxlength="150">
                     </div>
                     <div>
-                        <label for="team_description_new" class="form-label">Description (optional)</label>
+                        <label for="team_description_new" class="form-label"><?= $e('teams.description_optional') ?></label>
                         <textarea name="description" id="team_description_new" class="form-control" rows="3" maxlength="1000"></textarea>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Add team</button>
+                    <button type="submit" class="btn btn-primary w-100"><?= $e('teams.add_team') ?></button>
                 </form>
             </section>
 
             <section class="bb-action-card bb-action-card-accent">
                 <div class="bb-workspace-card-header">
                     <div>
-                        <span class="bb-settings-eyebrow">Group draw</span>
-                        <h3>Balanced Assignment</h3>
+                        <span class="bb-settings-eyebrow"><?= $e('teams_groups.group_draw') ?></span>
+                        <h3><?= $e('teams_groups.balanced_assignment') ?></h3>
                     </div>
-                    <span class="bb-status-pill"><?= $totalTeams ?> teams</span>
+                    <span class="bb-status-pill"><?= $e('teams.count', ['count' => $totalTeams]) ?></span>
                 </div>
-                <p class="bb-card-copy">Randomly distribute all teams across groups as evenly as possible. Existing assignments will be overwritten after confirmation.</p>
-                <form method="post" action="<?= htmlspecialchars($autoAssignTeamsActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm('Automatically assign all teams and overwrite current assignments?');">
+                <p class="bb-card-copy"><?= $e('teams_groups.balanced_assignment_help') ?></p>
+                <form method="post" action="<?= htmlspecialchars($autoAssignTeamsActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('teams_groups.auto_assign_confirm')), ENT_QUOTES, 'UTF-8') ?>);">
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                     <input type="hidden" name="confirm_overwrite" value="1">
                     <input type="hidden" name="return_section" value="groups">
-                    <button type="submit" class="btn btn-outline-primary w-100">Automatically assign teams</button>
+                    <button type="submit" class="btn btn-outline-primary w-100"><?= $e('teams_groups.automatically_assign_teams') ?></button>
                 </form>
             </section>
         </aside>
@@ -201,13 +201,13 @@ $renderTeamCard = static function (
             <section class="bb-group-card bb-group-card-unassigned">
                 <div class="bb-group-card-header">
                     <div>
-                        <span class="bb-settings-eyebrow">Needs attention</span>
-                        <h3>Unassigned Teams</h3>
+                        <span class="bb-settings-eyebrow"><?= $e('teams_groups.needs_attention') ?></span>
+                        <h3><?= $e('teams_groups.unassigned_teams') ?></h3>
                     </div>
                     <span class="bb-status-pill"><?= $unassignedCount ?></span>
                 </div>
                 <?php if (count($groupAssignment['unassigned_teams']) === 0): ?>
-                    <div class="bb-empty-state">All teams are currently assigned.</div>
+                    <div class="bb-empty-state"><?= $e('teams_groups.all_teams_assigned') ?></div>
                 <?php else: ?>
                     <div class="bb-team-card-list">
                         <?php foreach ($groupAssignment['unassigned_teams'] as $team): ?>
@@ -231,10 +231,10 @@ $renderTeamCard = static function (
             <section class="bb-group-section">
                 <div class="bb-board-section-heading">
                     <div>
-                        <span class="bb-settings-eyebrow">Generated groups</span>
-                        <h3>Group Cards</h3>
+                        <span class="bb-settings-eyebrow"><?= $e('teams_groups.generated_groups') ?></span>
+                        <h3><?= $e('teams_groups.group_cards') ?></h3>
                     </div>
-                    <div class="bb-group-chip-list" aria-label="Groups">
+                    <div class="bb-group-chip-list" aria-label="<?= $e('teams_groups.groups') ?>">
                         <?php foreach ($groups as $group): ?>
                             <span class="bb-group-chip"><?= htmlspecialchars((string) ($group['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span>
                         <?php endforeach; ?>
@@ -253,14 +253,14 @@ $renderTeamCard = static function (
                         <article class="bb-group-card">
                             <div class="bb-group-card-header">
                                 <div>
-                                    <span class="bb-settings-eyebrow">Group</span>
+                                    <span class="bb-settings-eyebrow"><?= $e('teams_groups.group') ?></span>
                                     <h3><?= htmlspecialchars($groupName, ENT_QUOTES, 'UTF-8') ?></h3>
                                 </div>
-                                <span class="bb-status-pill"><?= $teamCount ?> teams</span>
+                                <span class="bb-status-pill"><?= $e('teams.count', ['count' => $teamCount]) ?></span>
                             </div>
 
                             <?php if (count($groupTeams) === 0): ?>
-                                <div class="bb-empty-state">No teams assigned to this group yet.</div>
+                                <div class="bb-empty-state"><?= $e('teams_groups.no_teams_assigned_to_group') ?></div>
                             <?php else: ?>
                                 <div class="bb-team-card-list">
                                     <?php foreach ($groupTeams as $team): ?>
@@ -281,13 +281,13 @@ $renderTeamCard = static function (
                             <?php endif; ?>
 
                             <details class="bb-standings-details">
-                                <summary>Standings snapshot</summary>
+                                <summary><?= $e('teams_groups.standings_snapshot') ?></summary>
                                 <div class="table-responsive mt-2">
                                     <table class="table table-sm table-striped align-middle mb-0">
                                         <thead>
                                         <tr>
                                             <th>#</th>
-                                            <th>Team</th>
+                                            <th><?= $e('print.team') ?></th>
                                             <th>MP</th>
                                             <th>W</th>
                                             <th>D</th>
@@ -297,13 +297,13 @@ $renderTeamCard = static function (
                                             <th>PF</th>
                                             <th>PA</th>
                                             <th>+/-</th>
-                                            <th>Pts</th>
+                                            <th><?= $e('print.points_short') ?></th>
                                         </tr>
                                         </thead>
                                         <tbody>
                                         <?php if (count($standingsRows) === 0): ?>
                                             <tr>
-                                                <td colspan="12" class="text-muted">No teams assigned.</td>
+                                                <td colspan="12" class="text-muted"><?= $e('teams_groups.no_teams_assigned') ?></td>
                                             </tr>
                                         <?php endif; ?>
                                         <?php foreach ($standingsRows as $row): ?>
@@ -335,6 +335,9 @@ $renderTeamCard = static function (
 </div>
 <script>
     (function () {
+        var editLabel = <?= json_encode($t('common.edit'), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+        var closeLabel = <?= json_encode($t('common.close'), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+
         var setPanelState = function (panel, open) {
             if (!panel) {
                 return;
@@ -344,7 +347,7 @@ $renderTeamCard = static function (
             document.querySelectorAll('[data-team-edit-target="' + panel.id + '"]').forEach(function (button) {
                 if (button.classList.contains('bb-team-edit-toggle')) {
                     button.setAttribute('aria-expanded', open ? 'true' : 'false');
-                    button.textContent = open ? 'Close' : 'Edit';
+                    button.textContent = open ? closeLabel : editLabel;
                 }
             });
         };

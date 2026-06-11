@@ -239,6 +239,55 @@ body.bb-public-body {
     white-space: nowrap;
 }
 
+.bb-topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.bb-language-switcher {
+    position: relative;
+}
+
+.bb-language-button {
+    min-width: 3.75rem;
+    font-weight: 800;
+}
+
+.bb-language-button.dropdown-toggle::after {
+    margin-left: 0.35rem;
+    vertical-align: 0.12em;
+}
+
+.bb-language-menu {
+    min-width: 10rem;
+    padding: 0.35rem;
+}
+
+.bb-language-option {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    border-radius: 6px;
+    font-weight: 700;
+}
+
+.bb-language-option-code {
+    min-width: 1.8rem;
+    color: var(--bb-primary-soft);
+    font-weight: 850;
+}
+
+.bb-language-option.active,
+.bb-language-option:active {
+    background: rgba(249, 115, 22, 0.18);
+    color: #fff;
+}
+
+.bb-language-option.active .bb-language-option-code,
+.bb-language-option:active .bb-language-option-code {
+    color: #fff;
+}
+
 .bb-clock {
     color: var(--bb-primary-soft);
     font-weight: 800;
@@ -4603,6 +4652,16 @@ code {
 .bb-theme-light .btn-outline-light:hover,
 .bb-theme-light .btn-outline-dark:hover {
     color: var(--bb-text);
+}
+
+.bb-theme-light .bb-language-option.active,
+.bb-theme-light .bb-language-option:active {
+    color: var(--bb-text);
+}
+
+.bb-theme-light .bb-language-option.active .bb-language-option-code,
+.bb-theme-light .bb-language-option:active .bb-language-option-code {
+    color: var(--bb-primary-soft);
 }
 
 .bb-theme-light .alert {

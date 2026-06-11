@@ -18,12 +18,12 @@ $matchStage = is_string($matchStage ?? null) ? $matchStage : 'group';
 $isKnockoutStage = $matchStage === 'knockout';
 $requiresDependentResetConfirmation = (bool) ($requiresDependentResetConfirmation ?? false);
 $status = (string) ($match['status'] ?? 'pending');
-$statusLabel = ucwords(str_replace('_', ' ', $status));
+$statusLabel = $t('match_status.' . ($status !== '' ? $status : 'pending'));
 $matchMode = (string) ($match['match_mode'] ?? ($tournament['group_stage_mode'] ?? ($tournament['match_mode'] ?? '')));
 $matchModeLabel = match ($matchMode) {
-    'fixed_2_sets' => 'Fixed 2 sets',
-    'best_of_3' => 'Best of 3',
-    default => $matchMode !== '' ? ucwords(str_replace('_', ' ', $matchMode)) : 'Match mode',
+    'fixed_2_sets' => $t('match_mode.fixed_2_sets'),
+    'best_of_3' => $t('match_mode.best_of_3'),
+    default => $matchMode !== '' ? $matchMode : $t('match_detail.match_mode'),
 };
 $statusClass = 'text-bg-secondary';
 if ($status === 'scheduled') {
@@ -34,7 +34,7 @@ if ($status === 'scheduled') {
     $statusClass = 'text-bg-success';
 }
 
-$plannedStartDisplay = $isKnockoutStage ? 'TBD' : '-';
+$plannedStartDisplay = $isKnockoutStage ? $t('common.tbd') : '-';
 $plannedStartRaw = (string) ($match['planned_start'] ?? '');
 if ($plannedStartRaw !== '') {
     $plannedStartDate = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $plannedStartRaw);
@@ -43,8 +43,8 @@ if ($plannedStartRaw !== '') {
     }
 }
 
-$teamAName = (string) ($match['team_a_name'] ?? 'Team A');
-$teamBName = (string) ($match['team_b_name'] ?? 'Team B');
+$teamAName = (string) ($match['team_a_name'] ?? $t('print.team_a'));
+$teamBName = (string) ($match['team_b_name'] ?? $t('print.team_b'));
 $teamAId = (int) ($match['team_a_id'] ?? 0);
 $teamBId = (int) ($match['team_b_id'] ?? 0);
 $winnerTeamId = (int) ($match['winner_team_id'] ?? 0);
@@ -87,34 +87,34 @@ if ($winnerTeamId <= 0 && $status === 'finished') {
 $teamAWon = $winnerTeamId > 0 && $teamAId > 0 && $winnerTeamId === $teamAId;
 $teamBWon = $winnerTeamId > 0 && $teamBId > 0 && $winnerTeamId === $teamBId;
 $resultDisplay = $status === 'finished' ? ($setsSummaryA . ' : ' . $setsSummaryB) : 'vs';
-$setSummaryDisplay = $setSummaryParts !== [] ? implode(' / ', $setSummaryParts) : 'No set scores yet';
+$setSummaryDisplay = $setSummaryParts !== [] ? implode(' / ', $setSummaryParts) : $t('match_detail.no_set_scores_yet');
 
-$contextLabel = $isKnockoutStage ? 'Round' : 'Group';
+$contextLabel = $isKnockoutStage ? $t('knockout.round') : $t('teams_groups.group');
 $contextValue = (string) ($isKnockoutStage ? ($match['round_name'] ?? '-') : ($match['group_name'] ?? '-'));
 $courtNumber = (int) ($match['court_number'] ?? 0);
-$courtDisplay = $courtNumber > 0 ? ('Court ' . $courtNumber) : ($isKnockoutStage ? 'TBD' : '-');
+$courtDisplay = $courtNumber > 0 ? $t('common.court_number', ['number' => $courtNumber]) : ($isKnockoutStage ? $t('common.tbd') : '-');
 $subtitleParts = [
     $contextValue !== '' ? $contextLabel . ' ' . $contextValue : $contextLabel,
     $courtDisplay,
-    ($isKnockoutStage ? 'Estimated start ' : 'Planned start ') . $plannedStartDisplay,
+    ($isKnockoutStage ? $t('match_detail.estimated_start') : $t('match_detail.planned_start')) . ' ' . $plannedStartDisplay,
 ];
 ?>
 <section class="bb-match-detail-workspace">
     <header class="bb-workspace-header bb-match-detail-header">
         <div>
-            <span class="bb-section-kicker"><?= $isKnockoutStage ? 'Knockout scorekeeping' : 'Group scorekeeping' ?></span>
-            <h2><?= $isKnockoutStage ? 'Knockout Match Detail' : 'Group Match Detail' ?></h2>
+            <span class="bb-section-kicker"><?= $isKnockoutStage ? $e('match_detail.knockout_scorekeeping') : $e('match_detail.group_scorekeeping') ?></span>
+            <h2><?= $isKnockoutStage ? $e('match_detail.knockout_match_detail') : $e('match_detail.group_match_detail') ?></h2>
             <p><?= htmlspecialchars(implode(' | ', $subtitleParts), ENT_QUOTES, 'UTF-8') ?></p>
         </div>
-        <a href="<?= htmlspecialchars($backToMatchesUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm">Back to matches</a>
+        <a href="<?= htmlspecialchars($backToMatchesUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm"><?= $e('match_detail.back_to_matches') ?></a>
     </header>
 
-    <section class="bb-match-detail-hero" aria-label="Match summary">
+    <section class="bb-match-detail-hero" aria-label="<?= $e('match_detail.match_summary') ?>">
         <div class="bb-match-side <?= $teamAWon ? 'bb-match-side-winner' : '' ?>">
-            <span class="bb-match-side-label">Team A</span>
+            <span class="bb-match-side-label"><?= $e('print.team_a') ?></span>
             <strong><?= htmlspecialchars($teamAName, ENT_QUOTES, 'UTF-8') ?></strong>
             <?php if ($teamAWon): ?>
-                <span class="bb-winner-badge">W</span>
+                <span class="bb-winner-badge"><?= $e('common.winner_short') ?></span>
             <?php endif; ?>
         </div>
 
@@ -130,10 +130,10 @@ $subtitleParts = [
         </div>
 
         <div class="bb-match-side <?= $teamBWon ? 'bb-match-side-winner' : '' ?>">
-            <span class="bb-match-side-label">Team B</span>
+            <span class="bb-match-side-label"><?= $e('print.team_b') ?></span>
             <strong><?= htmlspecialchars($teamBName, ENT_QUOTES, 'UTF-8') ?></strong>
             <?php if ($teamBWon): ?>
-                <span class="bb-winner-badge">W</span>
+                <span class="bb-winner-badge"><?= $e('common.winner_short') ?></span>
             <?php endif; ?>
         </div>
     </section>
@@ -142,43 +142,43 @@ $subtitleParts = [
         <aside class="bb-match-actions-card">
             <div class="bb-workspace-card-header">
                 <div>
-                    <span class="bb-section-kicker">Control</span>
-                    <h3>Match Control</h3>
+                    <span class="bb-section-kicker"><?= $e('match_detail.control') ?></span>
+                    <h3><?= $e('match_detail.match_control') ?></h3>
                 </div>
             </div>
 
             <?php if (!$isKnockoutStage && is_string($startActionUrl ?? null) && $startActionUrl !== ''): ?>
                 <div class="bb-match-action-block">
-                    <strong>Start match</strong>
+                    <strong><?= $e('match_detail.start_match') ?></strong>
                     <?php if ($status === 'scheduled'): ?>
-                        <p>Move this match into scorekeeping when play begins.</p>
+                        <p><?= $e('match_detail.start_match_help') ?></p>
                         <form method="post" action="<?= htmlspecialchars($startActionUrl, ENT_QUOTES, 'UTF-8') ?>">
                             <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                             <input type="hidden" name="group_id" value="<?= (int) ($filters['group_id'] ?? 0) ?>">
                             <input type="hidden" name="court" value="<?= (int) ($filters['court'] ?? 0) ?>">
-                            <button type="submit" class="btn btn-primary w-100">Start match</button>
+                            <button type="submit" class="btn btn-primary w-100"><?= $e('match_detail.start_match') ?></button>
                         </form>
                     <?php else: ?>
-                        <p class="mb-0">Match can only be started from status <code>scheduled</code>.</p>
+                        <p class="mb-0"><?= $e('match_detail.can_only_start_scheduled', ['status' => $t('match_status.scheduled')]) ?></p>
                     <?php endif; ?>
                 </div>
             <?php else: ?>
                 <div class="bb-match-action-block">
-                    <strong>Current status</strong>
-                    <p class="mb-0">Use the score entry panel to record or correct this result.</p>
+                    <strong><?= $e('match_detail.current_status') ?></strong>
+                    <p class="mb-0"><?= $e('match_detail.score_entry_panel_help') ?></p>
                 </div>
             <?php endif; ?>
 
             <?php if ($status === 'finished'): ?>
                 <div class="bb-match-action-block">
-                    <strong>Result correction</strong>
-                    <p>Saving again will update the recorded result.</p>
+                    <strong><?= $e('match_detail.result_correction') ?></strong>
+                    <p><?= $e('match_detail.result_correction_help') ?></p>
                     <?php if (!$isKnockoutStage && is_string($resetActionUrl ?? null) && $resetActionUrl !== ''): ?>
-                        <form method="post" action="<?= htmlspecialchars($resetActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm('Reset result and set match back to scheduled?');">
+                        <form method="post" action="<?= htmlspecialchars($resetActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('match_detail.reset_result_confirm')), ENT_QUOTES, 'UTF-8') ?>);">
                             <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                             <input type="hidden" name="group_id" value="<?= (int) ($filters['group_id'] ?? 0) ?>">
                             <input type="hidden" name="court" value="<?= (int) ($filters['court'] ?? 0) ?>">
-                            <button type="submit" class="btn btn-outline-danger w-100">Reset result</button>
+                            <button type="submit" class="btn btn-outline-danger w-100"><?= $e('match_detail.reset_result') ?></button>
                         </form>
                     <?php endif; ?>
                 </div>
@@ -186,8 +186,8 @@ $subtitleParts = [
 
             <?php if ($requiresDependentResetConfirmation): ?>
                 <div class="bb-match-action-block bb-match-action-warning">
-                    <strong>Knockout dependency</strong>
-                    <p class="mb-0">Changing this result will reset dependent knockout matches after confirmation.</p>
+                    <strong><?= $e('match_detail.knockout_dependency') ?></strong>
+                    <p class="mb-0"><?= $e('match_detail.knockout_dependency_help') ?></p>
                 </div>
             <?php endif; ?>
         </aside>
@@ -195,9 +195,9 @@ $subtitleParts = [
         <section class="bb-score-entry-card">
             <div class="bb-workspace-card-header">
                 <div>
-                    <span class="bb-section-kicker">Score</span>
-                    <h3>Score Entry</h3>
-                    <p><?= htmlspecialchars($matchModeLabel, ENT_QUOTES, 'UTF-8') ?> scoring for this match.</p>
+                    <span class="bb-section-kicker"><?= $e('match_detail.score') ?></span>
+                    <h3><?= $e('match_detail.score_entry') ?></h3>
+                    <p><?= $e('match_detail.scoring_for_match', ['mode' => $matchModeLabel]) ?></p>
                 </div>
             </div>
 
@@ -206,7 +206,7 @@ $subtitleParts = [
                     method="post"
                     action="<?= htmlspecialchars($scoreActionUrl, ENT_QUOTES, 'UTF-8') ?>"
                     class="bb-score-form"
-                    <?= $requiresDependentResetConfirmation ? 'onsubmit="if(!confirm(\'Changing this result will reset dependent knockout matches. Continue?\')){return false;} var input=this.querySelector(\'input[name=confirm_reset_dependents]\'); if(input){input.value=\'1\';}"' : '' ?>
+                    <?= $requiresDependentResetConfirmation ? 'onsubmit="if(!confirm(' . htmlspecialchars(json_encode($t('match_detail.dependent_reset_confirm')), ENT_QUOTES, 'UTF-8') . ')){return false;} var input=this.querySelector(\'input[name=confirm_reset_dependents]\'); if(input){input.value=\'1\';}"' : '' ?>
                 >
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                     <?php if (!$isKnockoutStage): ?>
@@ -216,7 +216,7 @@ $subtitleParts = [
                     <input type="hidden" name="confirm_reset_dependents" value="0">
 
                     <div class="bb-score-entry-head" aria-hidden="true">
-                        <span>Set</span>
+                        <span><?= $e('print.set') ?></span>
                         <span><?= htmlspecialchars($teamAName, ENT_QUOTES, 'UTF-8') ?></span>
                         <span><?= htmlspecialchars($teamBName, ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
@@ -226,8 +226,8 @@ $subtitleParts = [
                             <?php $isRequired = $set <= 2; ?>
                             <div class="bb-score-set-row">
                                 <div class="bb-score-set-label">
-                                    <strong>Set <?= $set ?></strong>
-                                    <small><?= $isRequired ? 'Required' : 'Optional' ?></small>
+                                    <strong><?= $e('print.set_number', ['number' => $set]) ?></strong>
+                                    <small><?= $isRequired ? $e('common.required') : $e('common.optional') ?></small>
                                 </div>
                                 <label class="bb-score-input-wrap" for="set-<?= $set ?>-a">
                                     <span><?= htmlspecialchars($teamAName, ENT_QUOTES, 'UTF-8') ?></span>
@@ -261,23 +261,23 @@ $subtitleParts = [
 
                     <div class="bb-score-help">
                         <?php if ($matchMode === 'best_of_3'): ?>
-                            <p>Enter 2 sets for a 2:0 finish, or add set 3 for a 2:1 finish.</p>
+                            <p><?= $e('match_detail.best_of_3_help') ?></p>
                         <?php endif; ?>
                         <?php if ($status === 'finished'): ?>
-                            <p>This match is finished. Saving will correct the existing result.</p>
+                            <p><?= $e('match_detail.finished_save_corrects') ?></p>
                         <?php endif; ?>
                         <?php if ($requiresDependentResetConfirmation): ?>
-                            <p class="text-warning">Changing this result will reset dependent knockout matches.</p>
+                            <p class="text-warning"><?= $e('match_detail.dependent_reset_warning') ?></p>
                         <?php endif; ?>
                     </div>
 
                     <div class="bb-score-submit">
-                        <button type="submit" class="btn btn-success">Save result and finish match</button>
+                        <button type="submit" class="btn btn-success"><?= $e('match_detail.save_result_finish') ?></button>
                     </div>
                 </form>
             <?php else: ?>
                 <div class="bb-empty-state">
-                    Score entry is available for scheduled, in-progress, and finished matches.
+                    <?= $e('match_detail.score_entry_available_statuses') ?>
                 </div>
             <?php endif; ?>
         </section>
