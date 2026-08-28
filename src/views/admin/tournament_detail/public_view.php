@@ -15,6 +15,7 @@ declare(strict_types=1);
  * }> $publicScreenSettings */
 
 $tournamentId = (int) ($tournament['id'] ?? 0);
+$stateVersion = max(0, (int) ($tournament['state_version'] ?? 0));
 $publicViewEnabled = (int) ($tournament['public_view_enabled'] ?? 0) > 0;
 $autoplayEnabled = (int) ($tournament['autoplay_enabled'] ?? 1) > 0;
 $rotationIntervalSeconds = (int) ($tournament['rotation_interval_seconds'] ?? 15);
@@ -62,6 +63,7 @@ $screenLabels = [
 
     <form method="post" enctype="multipart/form-data" action="<?= htmlspecialchars($publicViewSettingsActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-public-settings-form">
         <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+        <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
         <input type="hidden" name="return_section" value="public_view">
         <input type="hidden" name="public_view_form" value="general">
 
@@ -130,7 +132,7 @@ $screenLabels = [
                     </div>
                     <div class="bb-field bb-field-full bb-map-field">
                         <label for="public_map_embed_url" class="form-label"><?= $e('public_view.map_embed') ?></label>
-                        <textarea class="form-control bb-large-textarea bb-map-embed-textarea" name="public_map_embed_url" id="public_map_embed_url" rows="6" maxlength="5000" placeholder="<?= $e('public_view.map_embed_placeholder') ?>"><?= htmlspecialchars($publicMapEmbedUrl, ENT_QUOTES, 'UTF-8') ?></textarea>
+                        <textarea class="form-control bb-large-textarea bb-map-embed-textarea" name="public_map_embed_url" id="public_map_embed_url" rows="6" maxlength="4000" placeholder="<?= $e('public_view.map_embed_placeholder') ?>"><?= htmlspecialchars($publicMapEmbedUrl, ENT_QUOTES, 'UTF-8') ?></textarea>
                         <div class="form-text"><?= $e('public_view.map_embed_help') ?></div>
                     </div>
                 </div>
@@ -183,16 +185,9 @@ $screenLabels = [
     <section class="bb-public-screens-card">
         <form method="post" action="<?= htmlspecialchars($publicViewSettingsActionUrl, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+            <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
             <input type="hidden" name="return_section" value="public_view">
             <input type="hidden" name="public_view_form" value="screen_list">
-            <input type="hidden" name="public_view_enabled" value="<?= $publicViewEnabled ? '1' : '0' ?>">
-            <input type="hidden" name="autoplay_enabled" value="<?= $autoplayEnabled ? '1' : '0' ?>">
-            <input type="hidden" name="rotation_interval_seconds" value="<?= $rotationIntervalSeconds ?>">
-            <input type="hidden" name="public_view_theme" value="<?= htmlspecialchars($publicViewTheme, ENT_QUOTES, 'UTF-8') ?>">
-            <input type="hidden" name="public_title_override" value="<?= htmlspecialchars($publicTitleOverride, ENT_QUOTES, 'UTF-8') ?>">
-            <input type="hidden" name="public_description" value="<?= htmlspecialchars($publicDescription, ENT_QUOTES, 'UTF-8') ?>">
-            <input type="hidden" name="public_map_url" value="<?= htmlspecialchars($publicMapUrl, ENT_QUOTES, 'UTF-8') ?>">
-            <input type="hidden" name="public_map_embed_url" value="<?= htmlspecialchars($publicMapEmbedUrl, ENT_QUOTES, 'UTF-8') ?>">
 
             <div class="bb-workspace-card-header">
                 <div>

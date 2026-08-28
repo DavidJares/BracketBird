@@ -8,6 +8,13 @@ use PDO;
 
 final class MatchModel
 {
+    public const WRITE_SAVED = 'saved';
+    public const WRITE_IDEMPOTENT = 'idempotent';
+    public const WRITE_STALE = 'stale';
+    public const WRITE_INVALID = 'invalid';
+    public const WRITE_REQUIRES_KNOCKOUT_RESET = 'requires_knockout_reset';
+    public const WRITE_REQUIRES_DEPENDENT_RESET = 'requires_dependent_reset';
+
     private Database $database;
 
     public function __construct(Database $database)
@@ -92,6 +99,7 @@ final class MatchModel
                 m.winner_team_id,
                 m.sets_summary_a,
                 m.sets_summary_b,
+                m.lock_version,
                 m.updated_at,
                 (
                     SELECT GROUP_CONCAT(CONCAT(ms.score_a, \':\', ms.score_b) ORDER BY ms.set_number ASC SEPARATOR \', \')
@@ -142,6 +150,7 @@ final class MatchModel
                 m.winner_team_id,
                 m.sets_summary_a,
                 m.sets_summary_b,
+                m.lock_version,
                 t.group_stage_mode AS match_mode
              FROM matches m
              INNER JOIN tournaments t ON t.id = m.tournament_id
@@ -181,10 +190,13 @@ final class MatchModel
                 tb.team_name AS team_b_name,
                 m.team_a_source,
                 m.team_b_source,
+                m.court_number,
+                m.planned_start,
                 m.status,
                 m.winner_team_id,
                 m.sets_summary_a,
                 m.sets_summary_b,
+                m.lock_version,
                 t.knockout_mode AS match_mode
              FROM matches m
              INNER JOIN tournaments t ON t.id = m.tournament_id
@@ -227,6 +239,7 @@ final class MatchModel
                 m.winner_team_id,
                 m.sets_summary_a,
                 m.sets_summary_b,
+                m.lock_version,
                 (
                     SELECT GROUP_CONCAT(CONCAT(ms.score_a, \':\', ms.score_b) ORDER BY ms.set_number ASC SEPARATOR \', \')
                     FROM match_sets ms
@@ -277,6 +290,7 @@ final class MatchModel
                 m.winner_team_id,
                 m.sets_summary_a,
                 m.sets_summary_b,
+                m.lock_version,
                 (
                     SELECT GROUP_CONCAT(CONCAT(ms.score_a, \':\', ms.score_b) ORDER BY ms.set_number ASC SEPARATOR \', \')
                     FROM match_sets ms
@@ -417,27 +431,47 @@ final class MatchModel
         return $setsByMatchId;
     }
 
-    public function markGroupMatchInProgress(int $tournamentId, int $matchId): bool
+    public function markGroupMatchInProgress(int $tournamentId, int $matchId, int $expectedLockVersion): bool
     {
         $pdo = $this->database->pdo();
-        $statement = $pdo->prepare(
-            'UPDATE matches
-             SET status = :next_status,
-                 updated_at = NOW()
-             WHERE id = :match_id
-               AND tournament_id = :tournament_id
-               AND stage = :stage
-               AND status = :current_status'
-        );
-        $statement->execute([
-            'next_status' => 'in_progress',
-            'match_id' => $matchId,
-            'tournament_id' => $tournamentId,
-            'stage' => 'group',
-            'current_status' => 'scheduled',
-        ]);
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
-        return $statement->rowCount() > 0;
+        try {
+            if (!$this->lockTournament($pdo, $tournamentId)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return false;
+            }
+
+            $statement = $pdo->prepare(
+                'UPDATE matches
+                 SET status = :next_status,
+                     lock_version = lock_version + 1,
+                     updated_at = NOW()
+                 WHERE id = :match_id
+                   AND tournament_id = :tournament_id
+                   AND stage = :stage
+                   AND status = :current_status
+                   AND lock_version = :lock_version'
+            );
+            $statement->execute([
+                'next_status' => 'in_progress',
+                'match_id' => $matchId,
+                'tournament_id' => $tournamentId,
+                'stage' => 'group',
+                'current_status' => 'scheduled',
+                'lock_version' => max(0, $expectedLockVersion),
+            ]);
+
+            $updated = $statement->rowCount() > 0;
+            if ($updated) {
+                $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            }
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return $updated;
+        } catch (\Throwable $throwable) {
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
+            throw $throwable;
+        }
     }
 
     /**
@@ -446,43 +480,122 @@ final class MatchModel
     public function saveGroupMatchResult(
         int $tournamentId,
         int $matchId,
+        int $expectedLockVersion,
+        int $expectedTeamAId,
+        int $expectedTeamBId,
         array $sets,
         int $setsSummaryA,
         int $setsSummaryB,
-        int $winnerTeamId
-    ): bool {
+        ?int $winnerTeamId,
+        bool $confirmResetKnockout
+    ): string {
         $pdo = $this->database->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
         try {
+            if (!$this->lockTournament($pdo, $tournamentId)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            $currentStatement = $pdo->prepare(
+                'SELECT team_a_id, team_b_id, status, winner_team_id,
+                        sets_summary_a, sets_summary_b, lock_version
+                 FROM matches
+                 WHERE id = :match_id
+                   AND tournament_id = :tournament_id
+                   AND stage = :stage
+                 LIMIT 1
+                 FOR UPDATE'
+            );
+            $currentStatement->execute([
+                'match_id' => $matchId,
+                'tournament_id' => $tournamentId,
+                'stage' => 'group',
+            ]);
+            $current = $currentStatement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($current)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            $currentTeamAId = (int) ($current['team_a_id'] ?? 0);
+            $currentTeamBId = (int) ($current['team_b_id'] ?? 0);
+            if (
+                $currentTeamAId !== $expectedTeamAId
+                || $currentTeamBId !== $expectedTeamBId
+            ) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+
+            $currentSets = $this->setsForMatchUsingPdo($pdo, $matchId);
+            if ($this->resultEquals($current, $currentSets, $sets, $setsSummaryA, $setsSummaryB, $winnerTeamId)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_IDEMPOTENT;
+            }
+            if ((int) ($current['lock_version'] ?? -1) !== $expectedLockVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+
+            if (!in_array((string) ($current['status'] ?? ''), ['scheduled', 'in_progress', 'finished'], true)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+            if (
+                $winnerTeamId !== null
+                && $winnerTeamId !== $currentTeamAId
+                && $winnerTeamId !== $currentTeamBId
+            ) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+            if (($setsSummaryA === $setsSummaryB) !== ($winnerTeamId === null)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            if ($this->hasKnockoutMatchesUsingPdo($pdo, $tournamentId)) {
+                if (!$confirmResetKnockout) {
+                    $this->commitIfOwned($pdo, $ownsTransaction);
+                    return self::WRITE_REQUIRES_KNOCKOUT_RESET;
+                }
+
+                $this->deleteMatchesByStageUsingPdo($pdo, $tournamentId, 'knockout');
+            }
+
             $matchUpdate = $pdo->prepare(
                 'UPDATE matches
                  SET sets_summary_a = :sets_summary_a,
                      sets_summary_b = :sets_summary_b,
                      winner_team_id = :winner_team_id,
                      status = :status,
+                     lock_version = lock_version + 1,
                      updated_at = NOW()
                  WHERE id = :match_id
                    AND tournament_id = :tournament_id
                    AND stage = :stage
-                   AND status IN (\'scheduled\', \'in_progress\', \'finished\')'
+                   AND status IN (\'scheduled\', \'in_progress\', \'finished\')
+                   AND lock_version = :lock_version'
             );
-            $matchUpdate->execute([
-                'sets_summary_a' => $setsSummaryA,
-                'sets_summary_b' => $setsSummaryB,
-                'winner_team_id' => $winnerTeamId,
-                'status' => 'finished',
-                'match_id' => $matchId,
-                'tournament_id' => $tournamentId,
-                'stage' => 'group',
-            ]);
+            $matchUpdate->bindValue(':sets_summary_a', $setsSummaryA, PDO::PARAM_INT);
+            $matchUpdate->bindValue(':sets_summary_b', $setsSummaryB, PDO::PARAM_INT);
+            if ($winnerTeamId === null) {
+                $matchUpdate->bindValue(':winner_team_id', null, PDO::PARAM_NULL);
+            } else {
+                $matchUpdate->bindValue(':winner_team_id', $winnerTeamId, PDO::PARAM_INT);
+            }
+            $matchUpdate->bindValue(':status', 'finished', PDO::PARAM_STR);
+            $matchUpdate->bindValue(':match_id', $matchId, PDO::PARAM_INT);
+            $matchUpdate->bindValue(':tournament_id', $tournamentId, PDO::PARAM_INT);
+            $matchUpdate->bindValue(':stage', 'group', PDO::PARAM_STR);
+            $matchUpdate->bindValue(':lock_version', $expectedLockVersion, PDO::PARAM_INT);
+            $matchUpdate->execute();
 
             if ($matchUpdate->rowCount() < 1) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-
-                return false;
+                $this->rollBackIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
             }
 
             $deleteSets = $pdo->prepare('DELETE FROM match_sets WHERE match_id = :match_id');
@@ -502,34 +615,91 @@ final class MatchModel
                 ]);
             }
 
-            $pdo->commit();
-            return true;
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::WRITE_SAVED;
         } catch (\Throwable $throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
             throw $throwable;
         }
     }
 
-    public function resetGroupMatchResult(int $tournamentId, int $matchId): bool
+    public function resetGroupMatchResult(
+        int $tournamentId,
+        int $matchId,
+        int $expectedLockVersion,
+        bool $confirmResetKnockout
+    ): string
     {
         $pdo = $this->database->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
         try {
+            if (!$this->lockTournament($pdo, $tournamentId)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            $currentStatement = $pdo->prepare(
+                'SELECT status, winner_team_id, sets_summary_a, sets_summary_b, lock_version
+                 FROM matches
+                 WHERE id = :match_id
+                   AND tournament_id = :tournament_id
+                   AND stage = :stage
+                 LIMIT 1
+                 FOR UPDATE'
+            );
+            $currentStatement->execute([
+                'match_id' => $matchId,
+                'tournament_id' => $tournamentId,
+                'stage' => 'group',
+            ]);
+            $current = $currentStatement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($current)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+            $currentSets = $this->setsForMatchUsingPdo($pdo, $matchId);
+            $alreadyReset = (string) ($current['status'] ?? '') === 'scheduled'
+                && (int) ($current['winner_team_id'] ?? 0) === 0
+                && (int) ($current['sets_summary_a'] ?? 0) === 0
+                && (int) ($current['sets_summary_b'] ?? 0) === 0
+                && count($currentSets) === 0;
+            if ($alreadyReset) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_IDEMPOTENT;
+            }
+            if ((int) ($current['lock_version'] ?? -1) !== $expectedLockVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+            if ((string) ($current['status'] ?? '') !== 'finished') {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            if ($this->hasKnockoutMatchesUsingPdo($pdo, $tournamentId)) {
+                if (!$confirmResetKnockout) {
+                    $this->commitIfOwned($pdo, $ownsTransaction);
+                    return self::WRITE_REQUIRES_KNOCKOUT_RESET;
+                }
+
+                $this->deleteMatchesByStageUsingPdo($pdo, $tournamentId, 'knockout');
+            }
+
             $matchUpdate = $pdo->prepare(
                 'UPDATE matches
                  SET sets_summary_a = 0,
                      sets_summary_b = 0,
                      winner_team_id = NULL,
                      status = :status,
+                     lock_version = lock_version + 1,
                      updated_at = NOW()
                  WHERE id = :match_id
                    AND tournament_id = :tournament_id
                    AND stage = :stage
-                   AND status = :current_status'
+                   AND status = :current_status
+                   AND lock_version = :lock_version'
             );
             $matchUpdate->execute([
                 'status' => 'scheduled',
@@ -537,26 +707,22 @@ final class MatchModel
                 'tournament_id' => $tournamentId,
                 'stage' => 'group',
                 'current_status' => 'finished',
+                'lock_version' => $expectedLockVersion,
             ]);
 
             if ($matchUpdate->rowCount() < 1) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-
-                return false;
+                $this->rollBackIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
             }
 
             $deleteSets = $pdo->prepare('DELETE FROM match_sets WHERE match_id = :match_id');
             $deleteSets->execute(['match_id' => $matchId]);
 
-            $pdo->commit();
-            return true;
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::WRITE_SAVED;
         } catch (\Throwable $throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
             throw $throwable;
         }
     }
@@ -571,12 +737,28 @@ final class MatchModel
      *     planned_start: string
      * }> $matches
      */
-    public function replaceGroupMatches(int $tournamentId, array $matches): void
+    public function replaceGroupMatches(
+        int $tournamentId,
+        int $expectedStateVersion,
+        array $matches
+    ): string
     {
         $pdo = $this->database->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
         try {
+            $currentStateVersion = $this->lockTournamentStateVersion($pdo, $tournamentId);
+            if ($currentStateVersion === null) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+            if ($currentStateVersion !== $expectedStateVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+
+            $this->deleteMatchesByStageUsingPdo($pdo, $tournamentId, 'knockout');
+
             $delete = $pdo->prepare(
                 'DELETE FROM matches
                  WHERE tournament_id = :tournament_id
@@ -645,12 +827,11 @@ final class MatchModel
                 }
             }
 
-            $pdo->commit();
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::WRITE_SAVED;
         } catch (\Throwable $throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
             throw $throwable;
         }
     }
@@ -668,12 +849,26 @@ final class MatchModel
      *     planned_start?: string|null
      * }> $matches
      */
-    public function replaceKnockoutMatches(int $tournamentId, array $matches): void
+    public function replaceKnockoutMatches(
+        int $tournamentId,
+        int $expectedStateVersion,
+        array $matches
+    ): string
     {
         $pdo = $this->database->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
         try {
+            $currentStateVersion = $this->lockTournamentStateVersion($pdo, $tournamentId);
+            if ($currentStateVersion === null) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+            if ($currentStateVersion !== $expectedStateVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+
             $delete = $pdo->prepare(
                 'DELETE FROM matches
                  WHERE tournament_id = :tournament_id
@@ -785,12 +980,11 @@ final class MatchModel
                 }
             }
 
-            $pdo->commit();
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::WRITE_SAVED;
         } catch (\Throwable $throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
             throw $throwable;
         }
     }
@@ -803,20 +997,117 @@ final class MatchModel
     public function applyKnockoutResultAndProgress(
         int $tournamentId,
         int $matchId,
+        int $expectedLockVersion,
+        int $expectedTeamAId,
+        int $expectedTeamBId,
         array $sets,
         int $setsSummaryA,
         int $setsSummaryB,
         int $winnerTeamId,
         array $resetMatchIds,
         array $resetSourceCodes,
-        string $winnerSourceCode
-    ): bool {
+        string $winnerSourceCode,
+        bool $confirmResetDependents
+    ): string {
         $pdo = $this->database->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
         try {
-            if (count($resetMatchIds) > 0) {
+            if (!$this->lockTournament($pdo, $tournamentId)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            $currentStatement = $pdo->prepare(
+                'SELECT team_a_id, team_b_id, status, winner_team_id,
+                        sets_summary_a, sets_summary_b, lock_version
+                 FROM matches
+                 WHERE id = :match_id
+                   AND tournament_id = :tournament_id
+                   AND stage = :stage
+                 LIMIT 1
+                 FOR UPDATE'
+            );
+            $currentStatement->execute([
+                'match_id' => $matchId,
+                'tournament_id' => $tournamentId,
+                'stage' => 'knockout',
+            ]);
+            $current = $currentStatement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($current)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            $currentTeamAId = (int) ($current['team_a_id'] ?? 0);
+            $currentTeamBId = (int) ($current['team_b_id'] ?? 0);
+            if (
+                $currentTeamAId !== $expectedTeamAId
+                || $currentTeamBId !== $expectedTeamBId
+            ) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+
+            $currentSets = $this->setsForMatchUsingPdo($pdo, $matchId);
+            if ($this->resultEquals($current, $currentSets, $sets, $setsSummaryA, $setsSummaryB, $winnerTeamId)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_IDEMPOTENT;
+            }
+            if ((int) ($current['lock_version'] ?? -1) !== $expectedLockVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
+            }
+            if (!in_array((string) ($current['status'] ?? ''), ['scheduled', 'in_progress', 'finished'], true)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+            if ($winnerTeamId !== $currentTeamAId && $winnerTeamId !== $currentTeamBId) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_INVALID;
+            }
+
+            $oldWinnerTeamId = (int) ($current['winner_team_id'] ?? 0);
+            $winnerChanged = $oldWinnerTeamId > 0 && $oldWinnerTeamId !== $winnerTeamId;
+            $winnerAssignmentChanged = $oldWinnerTeamId !== $winnerTeamId;
+            $resetMatchIds = array_values(array_unique(array_filter(
+                array_map('intval', $resetMatchIds),
+                static fn (int $id): bool => $id > 0
+            )));
+
+            if ($winnerChanged && count($resetMatchIds) > 0) {
                 $placeholders = implode(', ', array_fill(0, count($resetMatchIds), '?'));
+                $downstreamCheck = $pdo->prepare(
+                    'SELECT id, status, winner_team_id, sets_summary_a, sets_summary_b
+                     FROM matches
+                     WHERE tournament_id = ?
+                       AND stage = ?
+                       AND id IN (' . $placeholders . ')
+                     FOR UPDATE'
+                );
+                $downstreamCheck->execute(array_merge([$tournamentId, 'knockout'], $resetMatchIds));
+                $downstreamRows = $downstreamCheck->fetchAll(PDO::FETCH_ASSOC);
+                $hasScoredDownstream = false;
+                foreach ($downstreamRows as $downstreamRow) {
+                    if (!is_array($downstreamRow)) {
+                        continue;
+                    }
+
+                    if (
+                        in_array((string) ($downstreamRow['status'] ?? ''), ['in_progress', 'finished'], true)
+                        || (int) ($downstreamRow['winner_team_id'] ?? 0) > 0
+                        || (int) ($downstreamRow['sets_summary_a'] ?? 0) > 0
+                        || (int) ($downstreamRow['sets_summary_b'] ?? 0) > 0
+                    ) {
+                        $hasScoredDownstream = true;
+                        break;
+                    }
+                }
+                if ($hasScoredDownstream && !$confirmResetDependents) {
+                    $this->commitIfOwned($pdo, $ownsTransaction);
+                    return self::WRITE_REQUIRES_DEPENDENT_RESET;
+                }
+
                 $deleteSets = $pdo->prepare(
                     'DELETE FROM match_sets
                      WHERE match_id IN (' . $placeholders . ')'
@@ -833,6 +1124,7 @@ final class MatchModel
                          sets_summary_b = 0,
                          winner_team_id = NULL,
                          status = ?,
+                         lock_version = lock_version + 1,
                          updated_at = NOW()
                      WHERE tournament_id = ?
                        AND stage = ?
@@ -841,22 +1133,26 @@ final class MatchModel
                 $resetMatches->execute($params);
             }
 
-            if (count($resetSourceCodes) > 0) {
+            if ($winnerChanged && count($resetSourceCodes) > 0) {
                 $clearA = $pdo->prepare(
                     'UPDATE matches
                      SET team_a_id = NULL,
+                         lock_version = lock_version + 1,
                          updated_at = NOW()
                      WHERE tournament_id = :tournament_id
                        AND stage = :stage
-                       AND team_a_source = :source'
+                       AND team_a_source = :source
+                       AND team_a_id IS NOT NULL'
                 );
                 $clearB = $pdo->prepare(
                     'UPDATE matches
                      SET team_b_id = NULL,
+                         lock_version = lock_version + 1,
                          updated_at = NOW()
                      WHERE tournament_id = :tournament_id
                        AND stage = :stage
-                       AND team_b_source = :source'
+                       AND team_b_source = :source
+                       AND team_b_id IS NOT NULL'
                 );
                 foreach ($resetSourceCodes as $sourceCode) {
                     $clearA->execute([
@@ -878,11 +1174,13 @@ final class MatchModel
                      sets_summary_b = :sets_summary_b,
                      winner_team_id = :winner_team_id,
                      status = :status,
+                     lock_version = lock_version + 1,
                      updated_at = NOW()
                  WHERE id = :match_id
                    AND tournament_id = :tournament_id
                    AND stage = :stage
-                   AND status IN (\'scheduled\', \'in_progress\', \'finished\')'
+                   AND status IN (\'scheduled\', \'in_progress\', \'finished\')
+                   AND lock_version = :lock_version'
             );
             $matchUpdate->execute([
                 'sets_summary_a' => $setsSummaryA,
@@ -892,13 +1190,11 @@ final class MatchModel
                 'match_id' => $matchId,
                 'tournament_id' => $tournamentId,
                 'stage' => 'knockout',
+                'lock_version' => $expectedLockVersion,
             ]);
             if ($matchUpdate->rowCount() < 1) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-
-                return false;
+                $this->rollBackIfOwned($pdo, $ownsTransaction);
+                return self::WRITE_STALE;
             }
 
             $deleteCurrentSets = $pdo->prepare('DELETE FROM match_sets WHERE match_id = :match_id');
@@ -917,82 +1213,240 @@ final class MatchModel
                 ]);
             }
 
-            $assignA = $pdo->prepare(
-                'UPDATE matches
-                 SET team_a_id = :winner_team_id,
-                     updated_at = NOW()
-                 WHERE tournament_id = :tournament_id
-                   AND stage = :stage
-                   AND team_a_source = :source
-                   AND winner_team_id IS NULL'
-            );
-            $assignA->execute([
-                'winner_team_id' => $winnerTeamId,
-                'tournament_id' => $tournamentId,
-                'stage' => 'knockout',
-                'source' => $winnerSourceCode,
-            ]);
+            if ($winnerAssignmentChanged) {
+                $assignA = $pdo->prepare(
+                    'UPDATE matches
+                     SET team_a_id = :winner_team_id,
+                         lock_version = lock_version + 1,
+                         updated_at = NOW()
+                     WHERE tournament_id = :tournament_id
+                       AND stage = :stage
+                       AND team_a_source = :source
+                       AND winner_team_id IS NULL
+                       AND team_a_id IS NULL'
+                );
+                $assignA->execute([
+                    'winner_team_id' => $winnerTeamId,
+                    'tournament_id' => $tournamentId,
+                    'stage' => 'knockout',
+                    'source' => $winnerSourceCode,
+                ]);
 
-            $assignB = $pdo->prepare(
-                'UPDATE matches
-                 SET team_b_id = :winner_team_id,
-                     updated_at = NOW()
-                 WHERE tournament_id = :tournament_id
-                   AND stage = :stage
-                   AND team_b_source = :source
-                   AND winner_team_id IS NULL'
-            );
-            $assignB->execute([
-                'winner_team_id' => $winnerTeamId,
-                'tournament_id' => $tournamentId,
-                'stage' => 'knockout',
-                'source' => $winnerSourceCode,
-            ]);
-
-            $setScheduled = $pdo->prepare(
-                'UPDATE matches
-                 SET status = :scheduled,
-                     updated_at = NOW()
-                 WHERE tournament_id = :tournament_id
-                   AND stage = :stage
-                   AND winner_team_id IS NULL
-                   AND team_a_id IS NOT NULL
-                   AND team_b_id IS NOT NULL
-                   AND status = :pending'
-            );
-            $setScheduled->execute([
-                'scheduled' => 'scheduled',
-                'tournament_id' => $tournamentId,
-                'stage' => 'knockout',
-                'pending' => 'pending',
-            ]);
-
-            $setPending = $pdo->prepare(
-                'UPDATE matches
-                 SET status = :pending,
-                     updated_at = NOW()
-                 WHERE tournament_id = :tournament_id
-                   AND stage = :stage
-                   AND winner_team_id IS NULL
-                   AND (team_a_id IS NULL OR team_b_id IS NULL)
-                   AND status = :scheduled'
-            );
-            $setPending->execute([
-                'pending' => 'pending',
-                'tournament_id' => $tournamentId,
-                'stage' => 'knockout',
-                'scheduled' => 'scheduled',
-            ]);
-
-            $pdo->commit();
-            return true;
-        } catch (\Throwable $throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
+                $assignB = $pdo->prepare(
+                    'UPDATE matches
+                     SET team_b_id = :winner_team_id,
+                         lock_version = lock_version + 1,
+                         updated_at = NOW()
+                     WHERE tournament_id = :tournament_id
+                       AND stage = :stage
+                       AND team_b_source = :source
+                       AND winner_team_id IS NULL
+                       AND team_b_id IS NULL'
+                );
+                $assignB->execute([
+                    'winner_team_id' => $winnerTeamId,
+                    'tournament_id' => $tournamentId,
+                    'stage' => 'knockout',
+                    'source' => $winnerSourceCode,
+                ]);
             }
 
+            if ($winnerAssignmentChanged) {
+                $setScheduled = $pdo->prepare(
+                    'UPDATE matches
+                     SET status = :scheduled,
+                         lock_version = lock_version + 1,
+                         updated_at = NOW()
+                     WHERE tournament_id = :tournament_id
+                       AND stage = :stage
+                       AND winner_team_id IS NULL
+                       AND team_a_id IS NOT NULL
+                       AND team_b_id IS NOT NULL
+                       AND status = :pending'
+                );
+                $setScheduled->execute([
+                    'scheduled' => 'scheduled',
+                    'tournament_id' => $tournamentId,
+                    'stage' => 'knockout',
+                    'pending' => 'pending',
+                ]);
+
+                $setPending = $pdo->prepare(
+                    'UPDATE matches
+                     SET status = :pending,
+                         lock_version = lock_version + 1,
+                         updated_at = NOW()
+                     WHERE tournament_id = :tournament_id
+                       AND stage = :stage
+                       AND winner_team_id IS NULL
+                       AND (team_a_id IS NULL OR team_b_id IS NULL)
+                       AND status = :scheduled'
+                );
+                $setPending->execute([
+                    'pending' => 'pending',
+                    'tournament_id' => $tournamentId,
+                    'stage' => 'knockout',
+                    'scheduled' => 'scheduled',
+                ]);
+            }
+
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::WRITE_SAVED;
+        } catch (\Throwable $throwable) {
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
             throw $throwable;
         }
+    }
+
+    private function beginTransactionIfNeeded(PDO $pdo): bool
+    {
+        if ($pdo->inTransaction()) {
+            return false;
+        }
+
+        $pdo->beginTransaction();
+        return true;
+    }
+
+    private function commitIfOwned(PDO $pdo, bool $ownsTransaction): void
+    {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+    }
+
+    private function rollBackIfOwned(PDO $pdo, bool $ownsTransaction): void
+    {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+
+    private function lockTournament(PDO $pdo, int $tournamentId): bool
+    {
+        $statement = $pdo->prepare(
+            'SELECT id
+             FROM tournaments
+             WHERE id = :id
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $statement->execute(['id' => $tournamentId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    private function lockTournamentStateVersion(PDO $pdo, int $tournamentId): ?int
+    {
+        $statement = $pdo->prepare(
+            'SELECT state_version
+             FROM tournaments
+             WHERE id = :id
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $statement->execute(['id' => $tournamentId]);
+        $stateVersion = $statement->fetchColumn();
+
+        return $stateVersion === false ? null : (int) $stateVersion;
+    }
+
+    private function bumpTournamentStateVersion(PDO $pdo, int $tournamentId): void
+    {
+        $statement = $pdo->prepare(
+            'UPDATE tournaments
+             SET state_version = state_version + 1
+             WHERE id = :id'
+        );
+        $statement->execute(['id' => $tournamentId]);
+        if ($statement->rowCount() !== 1) {
+            throw new \RuntimeException('Tournament state version could not be advanced.');
+        }
+    }
+
+    /**
+     * @return list<array{set_number: int, score_a: int, score_b: int}>
+     */
+    private function setsForMatchUsingPdo(PDO $pdo, int $matchId): array
+    {
+        $statement = $pdo->prepare(
+            'SELECT set_number, score_a, score_b
+             FROM match_sets
+             WHERE match_id = :match_id
+             ORDER BY set_number ASC'
+        );
+        $statement->execute(['match_id' => $matchId]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        $sets = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $sets[] = [
+                'set_number' => (int) ($row['set_number'] ?? 0),
+                'score_a' => (int) ($row['score_a'] ?? 0),
+                'score_b' => (int) ($row['score_b'] ?? 0),
+            ];
+        }
+
+        return $sets;
+    }
+
+    /**
+     * @param array<string, mixed> $current
+     * @param list<array{set_number: int, score_a: int, score_b: int}> $currentSets
+     * @param list<array{set_number: int, score_a: int, score_b: int}> $newSets
+     */
+    private function resultEquals(
+        array $current,
+        array $currentSets,
+        array $newSets,
+        int $setsSummaryA,
+        int $setsSummaryB,
+        ?int $winnerTeamId
+    ): bool {
+        $currentWinner = $current['winner_team_id'] ?? null;
+        $normalizedCurrentWinner = is_numeric($currentWinner) && (int) $currentWinner > 0
+            ? (int) $currentWinner
+            : null;
+
+        return (string) ($current['status'] ?? '') === 'finished'
+            && (int) ($current['sets_summary_a'] ?? -1) === $setsSummaryA
+            && (int) ($current['sets_summary_b'] ?? -1) === $setsSummaryB
+            && $normalizedCurrentWinner === $winnerTeamId
+            && array_values($currentSets) === array_values($newSets);
+    }
+
+    private function hasKnockoutMatchesUsingPdo(PDO $pdo, int $tournamentId): bool
+    {
+        $statement = $pdo->prepare(
+            'SELECT id
+             FROM matches
+             WHERE tournament_id = :tournament_id
+               AND stage = :stage
+             LIMIT 1'
+        );
+        $statement->execute([
+            'tournament_id' => $tournamentId,
+            'stage' => 'knockout',
+        ]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    private function deleteMatchesByStageUsingPdo(PDO $pdo, int $tournamentId, string $stage): void
+    {
+        $statement = $pdo->prepare(
+            'DELETE FROM matches
+             WHERE tournament_id = :tournament_id
+               AND stage = :stage'
+        );
+        $statement->execute([
+            'tournament_id' => $tournamentId,
+            'stage' => $stage,
+        ]);
     }
 
     /**
@@ -1022,6 +1476,7 @@ final class MatchModel
                 m.winner_team_id,
                 m.sets_summary_a,
                 m.sets_summary_b,
+                m.lock_version,
                 (
                     SELECT GROUP_CONCAT(CONCAT(ms.score_a, \':\', ms.score_b) ORDER BY ms.set_number ASC SEPARATOR \', \')
                     FROM match_sets ms

@@ -4,16 +4,15 @@ declare(strict_types=1);
 
 /** @var list<array<string, mixed>> $tournaments */
 /** @var list<string> $matchModes */
+/** @var array<string, string> $oldTournamentInput */
 
 $modeLabels = [
     'fixed_2_sets' => $t('match_mode.fixed_2_sets'),
     'best_of_3' => $t('match_mode.best_of_3'),
 ];
-$isHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
-    || ((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-$scheme = $isHttps ? 'https' : 'http';
-$host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$origin = $scheme . '://' . $host;
+$oldTournamentInput = is_array($oldTournamentInput ?? null) ? $oldTournamentInput : [];
+$oldValue = static fn (string $field, string $default = ''): string => (string) ($oldTournamentInput[$field] ?? $default);
+$hasPreservedCreateInput = count($oldTournamentInput) > 0;
 $today = new \DateTimeImmutable('today');
 $totalTournaments = count($tournaments);
 $upcomingTournaments = 0;
@@ -70,7 +69,7 @@ usort(
     <header class="bb-workspace-header bb-dashboard-header">
         <div>
             <span class="bb-section-kicker"><?= $e('dashboard.superadmin') ?></span>
-            <h2><?= $e('dashboard.tournaments') ?></h2>
+            <h1><?= $e('dashboard.tournaments') ?></h1>
             <p><?= $e('dashboard.subtitle') ?></p>
         </div>
         <a href="#create-tournament" class="btn btn-primary"><?= $e('dashboard.create_tournament') ?></a>
@@ -104,7 +103,11 @@ usort(
         </div>
 
         <?php if ($totalTournaments === 0): ?>
-            <div class="bb-empty-state"><?= $e('dashboard.no_tournaments_yet') ?></div>
+            <div class="bb-empty-state bb-empty-state-action">
+                <strong><?= $e('dashboard.empty_title') ?></strong>
+                <span><?= $e('dashboard.empty_help') ?></span>
+                <a href="#create-tournament" class="btn btn-primary btn-sm"><?= $e('dashboard.create_tournament') ?></a>
+            </div>
         <?php else: ?>
             <div class="bb-dashboard-toolbar">
                 <label for="dashboard_tournament_search" class="visually-hidden"><?= $e('dashboard.search_tournaments') ?></label>
@@ -116,6 +119,7 @@ usort(
                 <?php foreach ($tournaments as $tournament): ?>
                     <?php
                     $tournamentId = (int) ($tournament['id'] ?? 0);
+                    $stateVersion = max(0, (int) ($tournament['state_version'] ?? 0));
                     $name = (string) ($tournament['name'] ?? '');
                     $slug = (string) ($tournament['slug'] ?? '');
                     $eventDate = trim((string) ($tournament['event_date'] ?? ''));
@@ -127,8 +131,8 @@ usort(
                     $groupModeLabel = (string) ($modeLabels[$groupMode] ?? $groupMode);
                     $knockoutModeLabel = (string) ($modeLabels[$knockoutMode] ?? $knockoutMode);
                     $detailUrl = $url('/admin/tournament?id=' . $tournamentId);
-                    $adminLoginUrl = $origin . $url('/tournament/' . $slug . '/login');
-                    $publicDisplayUrl = $origin . $url('/public/' . $slug . '/display');
+                    $adminLoginUrl = $absoluteUrl('/tournament/' . $slug . '/login');
+                    $publicDisplayUrl = $absoluteUrl('/public/' . $slug . '/display');
                     $publicViewEnabled = (int) ($tournament['public_view_enabled'] ?? 0) > 0;
                     $searchText = strtolower(trim($name . ' ' . $slug . ' ' . $location));
                     ?>
@@ -161,6 +165,7 @@ usort(
                                 <button type="button" class="btn btn-sm btn-outline-secondary js-dashboard-copy" data-copy-value="<?= htmlspecialchars($publicDisplayUrl, ENT_QUOTES, 'UTF-8') ?>"><?= $e('dashboard.copy_display_url') ?></button>
                                 <form method="post" action="<?= htmlspecialchars($url('/admin/tournaments/delete'), ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('dashboard.delete_tournament_confirm')), ENT_QUOTES, 'UTF-8') ?>);">
                                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                                    <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                                     <input type="hidden" name="confirm_delete" value="1">
                                     <button type="submit" class="btn btn-sm btn-outline-danger"><?= $e('common.delete') ?></button>
                                 </form>
@@ -182,6 +187,12 @@ usort(
             </div>
         </div>
 
+        <?php if ($hasPreservedCreateInput): ?>
+            <div class="alert alert-warning mx-3 mt-3 mb-0" role="status" id="create-tournament-validation" tabindex="-1">
+                <?= $e('dashboard.form_preserved') ?>
+            </div>
+        <?php endif; ?>
+
         <form method="post" action="<?= htmlspecialchars($url('/admin/tournaments/create'), ENT_QUOTES, 'UTF-8') ?>" class="bb-create-tournament-form">
             <section class="bb-create-form-section">
                 <div class="bb-create-form-section-head">
@@ -194,7 +205,7 @@ usort(
                 <div class="bb-create-form-grid">
                     <div class="bb-field bb-field-full">
                         <label for="name" class="form-label"><?= $e('tournament.name') ?></label>
-                        <input type="text" class="form-control" name="name" id="name" required maxlength="150" autocomplete="off">
+                        <input type="text" class="form-control" name="name" id="name" required maxlength="150" autocomplete="off" value="<?= htmlspecialchars($oldValue('name'), ENT_QUOTES, 'UTF-8') ?>">
                     </div>
                     <div class="bb-field bb-field-full">
                         <label for="slug" class="form-label"><?= $e('tournament.slug') ?></label>
@@ -206,15 +217,15 @@ usort(
                     </div>
                     <div class="bb-field">
                         <label for="event_date" class="form-label"><?= $e('tournament.event_date') ?></label>
-                        <input type="date" class="form-control" name="event_date" id="event_date">
+                        <input type="date" class="form-control" name="event_date" id="event_date" value="<?= htmlspecialchars($oldValue('event_date'), ENT_QUOTES, 'UTF-8') ?>">
                     </div>
                     <div class="bb-field">
                         <label for="start_time" class="form-label"><?= $e('tournament.start_time') ?></label>
-                        <input type="time" class="form-control" name="start_time" id="start_time" value="09:00">
+                        <input type="time" class="form-control" name="start_time" id="start_time" value="<?= htmlspecialchars($oldValue('start_time', '09:00'), ENT_QUOTES, 'UTF-8') ?>">
                     </div>
                     <div class="bb-field bb-field-full">
                         <label for="location" class="form-label"><?= $e('tournament.location') ?></label>
-                        <input type="text" class="form-control" name="location" id="location" maxlength="150">
+                        <input type="text" class="form-control" name="location" id="location" maxlength="150" value="<?= htmlspecialchars($oldValue('location'), ENT_QUOTES, 'UTF-8') ?>">
                     </div>
                 </div>
             </section>
@@ -230,7 +241,7 @@ usort(
                 <div class="bb-create-form-grid bb-create-form-grid-single">
                     <div class="bb-field">
                         <label for="admin_password" class="form-label"><?= $e('tournament.admin_password') ?></label>
-                        <input type="password" class="form-control" name="admin_password" id="admin_password" required minlength="8">
+                        <input type="password" class="form-control" name="admin_password" id="admin_password" required minlength="8" maxlength="72">
                     </div>
                 </div>
             </section>
@@ -246,19 +257,19 @@ usort(
                 <div class="bb-create-form-grid bb-create-form-grid-compact">
                     <div class="bb-field">
                         <label for="number_of_groups" class="form-label"><?= $e('tournament.groups') ?></label>
-                        <input type="number" class="form-control" name="number_of_groups" id="number_of_groups" min="1" max="52" value="2" required>
+                        <input type="number" class="form-control" name="number_of_groups" id="number_of_groups" min="1" max="32" value="<?= htmlspecialchars($oldValue('number_of_groups', '2'), ENT_QUOTES, 'UTF-8') ?>" required>
                     </div>
                     <div class="bb-field">
                         <label for="number_of_courts" class="form-label"><?= $e('tournament.courts') ?></label>
-                        <input type="number" class="form-control" name="number_of_courts" id="number_of_courts" min="1" max="99" value="1" required>
+                        <input type="number" class="form-control" name="number_of_courts" id="number_of_courts" min="1" max="99" value="<?= htmlspecialchars($oldValue('number_of_courts', '1'), ENT_QUOTES, 'UTF-8') ?>" required>
                     </div>
                     <div class="bb-field">
                         <label for="match_duration_minutes" class="form-label"><?= $e('tournament.match_duration') ?></label>
-                        <input type="number" class="form-control" name="match_duration_minutes" id="match_duration_minutes" min="1" max="240" value="20" required>
+                        <input type="number" class="form-control" name="match_duration_minutes" id="match_duration_minutes" min="1" max="240" value="<?= htmlspecialchars($oldValue('match_duration_minutes', '20'), ENT_QUOTES, 'UTF-8') ?>" required>
                     </div>
                     <div class="bb-field">
                         <label for="advancing_teams_count" class="form-label"><?= $e('tournament.advancing_teams') ?></label>
-                        <input type="number" class="form-control" name="advancing_teams_count" id="advancing_teams_count" min="1" max="64" value="2" required>
+                        <input type="number" class="form-control" name="advancing_teams_count" id="advancing_teams_count" min="2" max="64" value="<?= htmlspecialchars($oldValue('advancing_teams_count', '2'), ENT_QUOTES, 'UTF-8') ?>" required>
                     </div>
                 </div>
             </section>
@@ -276,7 +287,7 @@ usort(
                         <label for="group_stage_mode" class="form-label"><?= $e('tournament.group_stage_mode') ?></label>
                         <select class="form-select" name="group_stage_mode" id="group_stage_mode" required>
                             <?php foreach ($matchModes as $mode): ?>
-                                <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= $mode === 'fixed_2_sets' ? 'selected' : '' ?>><?= htmlspecialchars((string) ($modeLabels[$mode] ?? $mode), ENT_QUOTES, 'UTF-8') ?></option>
+                                <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= $mode === $oldValue('group_stage_mode', 'fixed_2_sets') ? 'selected' : '' ?>><?= htmlspecialchars((string) ($modeLabels[$mode] ?? $mode), ENT_QUOTES, 'UTF-8') ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -284,7 +295,7 @@ usort(
                         <label for="knockout_mode" class="form-label"><?= $e('tournament.knockout_mode') ?></label>
                         <select class="form-select" name="knockout_mode" id="knockout_mode" required>
                             <?php foreach ($matchModes as $mode): ?>
-                                <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= $mode === 'best_of_3' ? 'selected' : '' ?>><?= htmlspecialchars((string) ($modeLabels[$mode] ?? $mode), ENT_QUOTES, 'UTF-8') ?></option>
+                                <option value="<?= htmlspecialchars($mode, ENT_QUOTES, 'UTF-8') ?>" <?= $mode === $oldValue('knockout_mode', 'best_of_3') ? 'selected' : '' ?>><?= htmlspecialchars((string) ($modeLabels[$mode] ?? $mode), ENT_QUOTES, 'UTF-8') ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -381,6 +392,12 @@ usort(
 
             searchInput.addEventListener('input', syncSearch);
             syncSearch();
+        }
+
+        var validationSummary = document.getElementById('create-tournament-validation');
+        if (validationSummary) {
+            validationSummary.scrollIntoView({block: 'center'});
+            validationSummary.focus();
         }
     })();
 </script>

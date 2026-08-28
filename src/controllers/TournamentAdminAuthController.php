@@ -40,53 +40,83 @@ final class TournamentAdminAuthController extends BaseController
     public function login(): void
     {
         $slug = $this->requestRouteString('slug');
-        $rateScope = 'tournament_admin:' . $slug;
-        if ($this->isLoginRateLimited($rateScope)) {
-            $this->setFlash('error', 'Invalid credentials.');
-            $this->redirect('/tournament/' . $slug . '/login');
-        }
-
+        $password = $this->requestPostRawString('password');
         $tournamentModel = new TournamentModel($this->db());
         $tournament = $tournamentModel->findAuthBySlug($slug);
+        $rateScope = $tournament === null
+            ? 'tournament_admin:unknown'
+            : 'tournament_admin:id:' . (int) $tournament['id'];
+
+        if (!$this->reserveLoginAttempt($rateScope)) {
+            if ($tournament === null) {
+                $this->notFound();
+                return;
+            }
+
+            $this->setFlash('error', 'Invalid credentials.');
+            $this->redirect('/tournament/' . (string) $tournament['slug'] . '/login');
+        }
 
         if ($tournament === null) {
-            http_response_code(404);
-            header('Content-Type: text/html; charset=utf-8');
-            echo '404 Not Found';
+            $this->verifyPasswordOrDummy($password, null);
+            $this->notFound();
             return;
         }
 
-        $password = $this->requestPostString('password');
-        if ($password === '') {
-            $this->setFlash('error', 'Password is required.');
-            $this->redirect('/tournament/' . $slug . '/login');
-        }
-
-        if (!password_verify($password, (string) $tournament['admin_password_hash'])) {
-            $this->recordLoginFailure($rateScope);
+        $passwordHash = (string) ($tournament['admin_password_hash'] ?? '');
+        if (!$this->verifyPasswordOrDummy($password, $passwordHash)) {
             $this->setFlash('error', 'Invalid credentials.');
-            $this->redirect('/tournament/' . $slug . '/login');
+            $this->redirect('/tournament/' . (string) $tournament['slug'] . '/login');
         }
 
-        session_regenerate_id(true);
-        $_SESSION['tournament_admin'] = [
+        if (password_needs_rehash($passwordHash, PASSWORD_DEFAULT)) {
+            $rehash = $tournamentModel->rehashAdminPassword(
+                (int) $tournament['id'],
+                $password,
+                $passwordHash
+            );
+            if ($rehash === null) {
+                $this->setFlash('error', 'Invalid credentials.');
+                $this->redirect('/tournament/' . (string) $tournament['slug'] . '/login');
+            }
+
+            $passwordHash = $rehash;
+        }
+
+        $credentialFingerprint = hash('sha256', $passwordHash);
+        $this->resetLoginThrottle($rateScope);
+        $this->establishAuthentication('tournament_admin', [
             'id' => (int) $tournament['id'],
             'slug' => (string) $tournament['slug'],
             'name' => (string) $tournament['name'],
-        ];
-        $this->resetLoginThrottle($rateScope);
+        ], $credentialFingerprint);
+        $this->logSecurityEvent('tournament_admin_login_succeeded', [
+            'tournament_id' => (int) $tournament['id'],
+        ]);
 
         $this->setFlash('success', 'Tournament admin access granted.');
-        $this->redirect('/tournament/' . $slug . '/admin');
+        $this->redirect('/tournament/' . (string) $tournament['slug'] . '/admin');
     }
 
     public function logout(): void
     {
         $slug = $this->requestRouteString('slug');
-        unset($_SESSION['tournament_admin']);
-        session_regenerate_id(true);
+        $tournamentAdmin = $this->currentTournamentAdmin();
+        $this->endAuthentication();
+        if (is_array($tournamentAdmin)) {
+            $this->logSecurityEvent('tournament_admin_logout', [
+                'tournament_id' => (int) $tournamentAdmin['id'],
+            ]);
+        }
 
         $this->setFlash('success', 'Tournament admin signed out.');
         $this->redirect('/tournament/' . $slug . '/login');
+    }
+
+    private function notFound(): void
+    {
+        http_response_code(404);
+        header('Content-Type: text/html; charset=utf-8');
+        echo '404 Not Found';
     }
 }

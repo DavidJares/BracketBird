@@ -68,9 +68,18 @@ $stageLabel = static function (array $match) use ($t): string {
 $setSummaryText = static function (array $match): string {
     return trim((string) ($match['set_scores_summary'] ?? ''));
 };
-$winnerClassForTeam = static function (array $match, string $side): string {
+$groupMatchModeForWinner = (string) ($tournament['group_stage_mode'] ?? 'fixed_2_sets');
+$isFixedGroupDraw = static function (array $match) use ($groupMatchModeForWinner): bool {
+    $stage = (string) ($match['stage'] ?? '');
+    $isGroup = $stage === 'group' || ($stage === '' && (int) ($match['group_id'] ?? 0) > 0);
+    return $isGroup
+        && $groupMatchModeForWinner === 'fixed_2_sets'
+        && (string) ($match['status'] ?? '') === 'finished'
+        && (int) ($match['sets_summary_a'] ?? 0) === (int) ($match['sets_summary_b'] ?? 0);
+};
+$winnerClassForTeam = static function (array $match, string $side) use ($isFixedGroupDraw): string {
     $status = (string) ($match['status'] ?? '');
-    if ($status !== 'finished') {
+    if ($status !== 'finished' || $isFixedGroupDraw($match)) {
         return '';
     }
     $winnerTeamId = (int) ($match['winner_team_id'] ?? 0);
@@ -80,9 +89,9 @@ $winnerClassForTeam = static function (array $match, string $side): string {
     $teamId = $side === 'a' ? (int) ($match['team_a_id'] ?? 0) : (int) ($match['team_b_id'] ?? 0);
     return $winnerTeamId === $teamId ? 'public-winner-name' : '';
 };
-$isWinnerForTeam = static function (array $match, string $side): bool {
+$isWinnerForTeam = static function (array $match, string $side) use ($isFixedGroupDraw): bool {
     $status = (string) ($match['status'] ?? '');
-    if ($status !== 'finished') {
+    if ($status !== 'finished' || $isFixedGroupDraw($match)) {
         return false;
     }
     $winnerTeamId = (int) ($match['winner_team_id'] ?? 0);
@@ -126,7 +135,13 @@ $courtBadge = static function (array $match) use ($courtBadgeClasses): array {
     $class = $court > 0 ? ($courtBadgeClasses[($court - 1) % count($courtBadgeClasses)] ?? 'text-bg-secondary') : 'text-bg-secondary';
     return [$court, $class];
 };
-$advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0));
+$advancingTeamIdSet = [];
+foreach (is_array($advancingTeamIds ?? null) ? $advancingTeamIds : [] as $advancingTeamId) {
+    $advancingTeamId = (int) $advancingTeamId;
+    if ($advancingTeamId > 0) {
+        $advancingTeamIdSet[$advancingTeamId] = true;
+    }
+}
 ?>
 <section class="bb-public-shell">
     <header class="bb-public-header">
@@ -150,7 +165,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
     <?php if (count($enabledScreens) > 1): ?>
         <nav class="bb-public-nav" aria-label="<?= $e('public.screens') ?>">
             <?php foreach ($enabledScreens as $screen): ?>
-                <a href="<?= htmlspecialchars((string) $screen['url'], ENT_QUOTES, 'UTF-8') ?>" class="bb-public-nav-link <?= $screen['key'] === $screenKey ? 'active' : '' ?>">
+                <a href="<?= htmlspecialchars((string) $screen['url'], ENT_QUOTES, 'UTF-8') ?>" class="bb-public-nav-link <?= $screen['key'] === $screenKey ? 'active' : '' ?>"<?= $screen['key'] === $screenKey ? ' aria-current="page"' : '' ?>>
                     <?= htmlspecialchars((string) ($publicScreenLabels[(string) $screen['key']] ?? $screen['label']), ENT_QUOTES, 'UTF-8') ?>
                 </a>
             <?php endforeach; ?>
@@ -192,7 +207,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
             <aside class="bb-public-hero-side">
                 <?php if ($logoUrl !== ''): ?>
                     <div class="bb-public-logo-panel">
-                        <img src="<?= htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Tournament logo">
+                        <img src="<?= htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $e('public_view.current_logo_alt') ?>">
                     </div>
                 <?php endif; ?>
                 <?php require __DIR__ . '/_qr.php'; ?>
@@ -285,13 +300,15 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                         <div class="bb-public-card-title"><?= $e('teams_groups.group_name', ['name' => (string) ($groupNameById[(int) $groupId] ?? $groupId)]) ?></div>
                         <div class="table-responsive">
                             <table class="table table-sm mb-0 public-table public-standings">
-                    <thead><tr><th class="col-rank">#</th><th class="col-team"><?= $e('print.team') ?></th><th class="col-num">P</th><th class="col-num">W</th><th class="col-num">D</th><th class="col-num">L</th><th class="col-num"><?= $e('print.points_short') ?></th><th class="col-num"><?= $e('print.diff') ?></th></tr></thead>
+                                <caption class="visually-hidden"><?= $e('standings.group_caption', ['group' => (string) ($groupNameById[(int) $groupId] ?? $groupId)]) ?></caption>
+                    <thead><tr><th scope="col" class="col-rank">#</th><th scope="col" class="col-team"><?= $e('print.team') ?></th><th scope="col" class="col-num">P</th><th scope="col" class="col-num">W</th><th scope="col" class="col-num">D</th><th scope="col" class="col-num">L</th><th scope="col" class="col-num"><?= $e('print.points_short') ?></th><th scope="col" class="col-num"><?= $e('print.diff') ?></th></tr></thead>
                                 <tbody>
                                 <?php foreach ($rows as $row): ?>
                                     <?php $position = (int) ($row['position'] ?? 0); ?>
-                                    <tr class="<?= $advancingTeamsCount > 0 && $position > 0 && $position <= $advancingTeamsCount ? 'bb-public-advancing-row' : '' ?>">
+                                    <?php $teamId = (int) ($row['team_id'] ?? 0); ?>
+                                    <tr class="<?= isset($advancingTeamIdSet[$teamId]) ? 'bb-public-advancing-row' : '' ?>">
                                         <td class="col-rank"><span><?= $position ?></span></td>
-                                        <td class="col-team"><?= htmlspecialchars((string) ($row['team_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></td>
+                                        <th scope="row" class="col-team"><?= htmlspecialchars((string) ($row['team_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></th>
                                         <td class="col-num"><?= (int) ($row['played'] ?? 0) ?></td>
                                         <td class="col-num"><?= (int) ($row['wins'] ?? 0) ?></td>
                                         <td class="col-num"><?= (int) ($row['draws'] ?? 0) ?></td>
@@ -306,6 +323,7 @@ $advancingTeamsCount = max(0, (int) ($tournament['advancing_teams_count'] ?? 0))
                     </section>
                 <?php endforeach; ?>
             </div>
+            <p class="bb-standings-rule"><?= $e('standings.tie_break_help') ?></p>
         <?php endif; ?>
     <?php elseif ($screenKey === 'group_schedule'): ?>
         <?php if (!is_array($groupMatches ?? null) || count($groupMatches) === 0): ?>

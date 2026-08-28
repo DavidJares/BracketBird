@@ -227,6 +227,11 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
         </div>
     </header>
 
+    <details class="bb-stage-generation" <?= !$hasExistingKnockoutMatches ? 'open' : '' ?>>
+        <summary>
+            <span><?= $e('knockout.generate') ?></span>
+            <strong><?= $e('knockout.stage') ?></strong>
+        </summary>
     <section class="bb-knockout-toolbar">
         <div class="bb-knockout-action-copy">
             <span class="bb-section-kicker"><?= $e('knockout.generate') ?></span>
@@ -281,6 +286,7 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
             </form>
         </div>
     </section>
+    </details>
 
     <div class="bb-knockout-viewbar">
         <div>
@@ -288,8 +294,8 @@ $renderTeamRow = static function (array $team, bool $isWinner, string $className
             <strong><?= $knockoutView === 'bracket' ? $e('knockout.bracket_view') : $e('knockout.table_view') ?></strong>
         </div>
         <div class="bb-view-switcher" role="group" aria-label="<?= $e('knockout.view') ?>">
-            <a href="<?= htmlspecialchars($tableViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'table' ? 'active' : '' ?>"><?= $e('knockout.table_view') ?></a>
-            <a href="<?= htmlspecialchars($bracketViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'bracket' ? 'active' : '' ?>"><?= $e('knockout.bracket_view') ?></a>
+            <a href="<?= htmlspecialchars($tableViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'table' ? 'active' : '' ?>"<?= $knockoutView === 'table' ? ' aria-current="page"' : '' ?>><?= $e('knockout.table_view') ?></a>
+            <a href="<?= htmlspecialchars($bracketViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="<?= $knockoutView === 'bracket' ? 'active' : '' ?>"<?= $knockoutView === 'bracket' ? ' aria-current="page"' : '' ?>><?= $e('knockout.bracket_view') ?></a>
         </div>
     </div>
 

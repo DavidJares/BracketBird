@@ -19,12 +19,16 @@ declare(strict_types=1);
 /** @var string $assignTeamActionUrl */
 /** @var string $autoAssignTeamsActionUrl */
 /** @var array<int, list<array<string, int|string>>> $groupStandingsByGroup */
+/** @var bool $hasAnyMatches */
 
 $tournamentId = (int) ($tournament['id'] ?? 0);
+$stateVersion = max(0, (int) ($tournament['state_version'] ?? 0));
 $totalTeams = (int) $groupAssignment['total_teams'];
 $groupCount = (int) $groupAssignment['group_count'];
 $unassignedCount = (int) $groupAssignment['unassigned_count'];
 $assignedCount = max(0, $totalTeams - $unassignedCount);
+$hasAnyMatches = (bool) ($hasAnyMatches ?? false);
+$teamLimitReached = $totalTeams >= 64;
 
 $renderAssignmentOptions = static function (array $groups, ?int $selectedGroupId) use ($e): void {
     ?>
@@ -46,8 +50,9 @@ $renderTeamCard = static function (
     string $assignTeamActionUrl,
     string $updateTeamActionUrl,
     string $deleteTeamActionUrl,
+    bool $hasAnyMatches,
     callable $renderAssignmentOptions
-) use ($e, $t): void {
+) use ($e, $t, $stateVersion): void {
     $teamId = (int) ($team['id'] ?? 0);
     $teamName = (string) ($team['team_name'] ?? '');
     $description = (string) ($team['description'] ?? '');
@@ -62,6 +67,9 @@ $renderTeamCard = static function (
     }
     $assignmentLabel = $selectedGroupId === null ? $t('teams_groups.unassigned') : $t('teams_groups.group_name', ['name' => $groupName]);
     $editPanelId = 'team-edit-panel-' . $teamId;
+    $deleteConfirmation = $hasAnyMatches
+        ? $t('teams.delete_team_with_matches_confirm')
+        : $t('teams.delete_team_confirm');
     ?>
     <article class="bb-team-item <?= $selectedGroupId === null ? 'bb-team-item-unassigned' : '' ?>">
         <div class="bb-team-item-header">
@@ -79,11 +87,15 @@ $renderTeamCard = static function (
 
             <div class="bb-team-actions">
                 <button type="button" class="btn btn-sm btn-outline-secondary bb-team-edit-toggle" data-team-edit-target="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" aria-controls="<?= htmlspecialchars($editPanelId, ENT_QUOTES, 'UTF-8') ?>" aria-expanded="false"><?= $e('common.edit') ?></button>
-                <form method="post" action="<?= htmlspecialchars($deleteTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('teams.delete_team_confirm')), ENT_QUOTES, 'UTF-8') ?>);" class="bb-team-delete-form">
+                <form method="post" action="<?= htmlspecialchars($deleteTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($deleteConfirmation), ENT_QUOTES, 'UTF-8') ?>);" class="bb-team-delete-form">
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                    <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                     <input type="hidden" name="team_id" value="<?= $teamId ?>">
                     <input type="hidden" name="confirm_delete" value="1">
                     <input type="hidden" name="return_section" value="groups">
+                    <?php if ($hasAnyMatches): ?>
+                        <input type="hidden" name="confirm_reset_matches" value="1">
+                    <?php endif; ?>
                     <button type="submit" class="btn btn-sm btn-outline-danger"><?= $e('common.delete') ?></button>
                 </form>
             </div>
@@ -97,6 +109,7 @@ $renderTeamCard = static function (
 
             <form method="post" action="<?= htmlspecialchars($updateTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-team-edit-form">
                 <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                 <input type="hidden" name="team_id" value="<?= $teamId ?>">
                 <input type="hidden" name="return_section" value="groups">
                 <div>
@@ -112,6 +125,7 @@ $renderTeamCard = static function (
 
             <form method="post" action="<?= htmlspecialchars($assignTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-team-assignment-form">
                 <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                 <input type="hidden" name="team_id" value="<?= $teamId ?>">
                 <input type="hidden" name="return_section" value="groups">
                 <div>
@@ -119,6 +133,12 @@ $renderTeamCard = static function (
                     <select name="group_id" class="form-select form-select-sm" aria-label="<?= $e('teams_groups.assign_team_to_group', ['team' => $teamName]) ?>">
                         <?php $renderAssignmentOptions($groups, $selectedGroupId); ?>
                     </select>
+                    <?php if ($hasAnyMatches): ?>
+                        <label class="form-check small text-warning mt-2">
+                            <input class="form-check-input" type="checkbox" name="confirm_reset_matches" value="1" required>
+                            <span class="form-check-label"><?= $e('teams_groups.confirm_assignment_reset_matches') ?></span>
+                        </label>
+                    <?php endif; ?>
                 </div>
                 <button type="submit" class="btn btn-sm btn-primary"><?= $e('teams_groups.save_group') ?></button>
             </form>
@@ -135,6 +155,12 @@ $renderTeamCard = static function (
             <p><?= $e('teams_groups.subtitle') ?></p>
         </div>
     </header>
+
+    <?php if ($hasAnyMatches): ?>
+        <div class="alert alert-warning" role="alert">
+            <?= $e('teams_groups.match_reset_warning') ?>
+        </div>
+    <?php endif; ?>
 
     <section class="bb-metric-grid" aria-label="<?= $e('teams_groups.summary') ?>">
         <div class="bb-metric-card">
@@ -169,13 +195,16 @@ $renderTeamCard = static function (
                     <input type="hidden" name="return_section" value="groups">
                     <div>
                         <label for="team_name_new" class="form-label"><?= $e('teams.team_name') ?></label>
-                        <input type="text" name="team_name" id="team_name_new" class="form-control" required maxlength="150">
+                        <input type="text" name="team_name" id="team_name_new" class="form-control" required maxlength="150" <?= $teamLimitReached ? 'disabled' : '' ?>>
                     </div>
                     <div>
                         <label for="team_description_new" class="form-label"><?= $e('teams.description_optional') ?></label>
-                        <textarea name="description" id="team_description_new" class="form-control" rows="3" maxlength="1000"></textarea>
+                        <textarea name="description" id="team_description_new" class="form-control" rows="3" maxlength="1000" <?= $teamLimitReached ? 'disabled' : '' ?>></textarea>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100"><?= $e('teams.add_team') ?></button>
+                    <?php if ($teamLimitReached): ?>
+                        <div class="form-text text-warning"><?= $e('teams.team_limit_reached') ?></div>
+                    <?php endif; ?>
+                    <button type="submit" class="btn btn-primary w-100" <?= $teamLimitReached ? 'disabled' : '' ?>><?= $e('teams.add_team') ?></button>
                 </form>
             </section>
 
@@ -190,14 +219,21 @@ $renderTeamCard = static function (
                 <p class="bb-card-copy"><?= $e('teams_groups.balanced_assignment_help') ?></p>
                 <form method="post" action="<?= htmlspecialchars($autoAssignTeamsActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('teams_groups.auto_assign_confirm')), ENT_QUOTES, 'UTF-8') ?>);">
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                    <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                     <input type="hidden" name="confirm_overwrite" value="1">
                     <input type="hidden" name="return_section" value="groups">
+                    <?php if ($hasAnyMatches): ?>
+                        <label class="form-check small text-warning mb-2">
+                            <input class="form-check-input" type="checkbox" name="confirm_reset_matches" value="1" required>
+                            <span class="form-check-label"><?= $e('teams_groups.confirm_auto_reset_matches') ?></span>
+                        </label>
+                    <?php endif; ?>
                     <button type="submit" class="btn btn-outline-primary w-100"><?= $e('teams_groups.automatically_assign_teams') ?></button>
                 </form>
             </section>
         </aside>
 
-        <main class="bb-workspace-board">
+        <div class="bb-workspace-board">
             <section class="bb-group-card bb-group-card-unassigned">
                 <div class="bb-group-card-header">
                     <div>
@@ -220,6 +256,7 @@ $renderTeamCard = static function (
                                 $assignTeamActionUrl,
                                 $updateTeamActionUrl,
                                 $deleteTeamActionUrl,
+                                $hasAnyMatches,
                                 $renderAssignmentOptions
                             );
                             ?>
@@ -273,6 +310,7 @@ $renderTeamCard = static function (
                                             $assignTeamActionUrl,
                                             $updateTeamActionUrl,
                                             $deleteTeamActionUrl,
+                                            $hasAnyMatches,
                                             $renderAssignmentOptions
                                         );
                                         ?>
@@ -284,20 +322,21 @@ $renderTeamCard = static function (
                                 <summary><?= $e('teams_groups.standings_snapshot') ?></summary>
                                 <div class="table-responsive mt-2">
                                     <table class="table table-sm table-striped align-middle mb-0">
+                                        <caption class="visually-hidden"><?= $e('standings.group_caption', ['group' => $groupName]) ?></caption>
                                         <thead>
                                         <tr>
-                                            <th>#</th>
-                                            <th><?= $e('print.team') ?></th>
-                                            <th>MP</th>
-                                            <th>W</th>
-                                            <th>D</th>
-                                            <th>L</th>
-                                            <th>SF</th>
-                                            <th>SA</th>
-                                            <th>PF</th>
-                                            <th>PA</th>
-                                            <th>+/-</th>
-                                            <th><?= $e('print.points_short') ?></th>
+                                            <th scope="col">#</th>
+                                            <th scope="col"><?= $e('print.team') ?></th>
+                                            <th scope="col">MP</th>
+                                            <th scope="col">W</th>
+                                            <th scope="col">D</th>
+                                            <th scope="col">L</th>
+                                            <th scope="col">SF</th>
+                                            <th scope="col">SA</th>
+                                            <th scope="col">PF</th>
+                                            <th scope="col">PA</th>
+                                            <th scope="col">+/-</th>
+                                            <th scope="col"><?= $e('print.points_short') ?></th>
                                         </tr>
                                         </thead>
                                         <tbody>
@@ -309,7 +348,7 @@ $renderTeamCard = static function (
                                         <?php foreach ($standingsRows as $row): ?>
                                             <tr>
                                                 <td><?= (int) ($row['position'] ?? 0) ?></td>
-                                                <td><?= htmlspecialchars((string) ($row['team_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
+                                                <th scope="row"><?= htmlspecialchars((string) ($row['team_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></th>
                                                 <td><?= (int) ($row['played'] ?? 0) ?></td>
                                                 <td><?= (int) ($row['wins'] ?? 0) ?></td>
                                                 <td><?= (int) ($row['draws'] ?? 0) ?></td>
@@ -324,13 +363,14 @@ $renderTeamCard = static function (
                                         <?php endforeach; ?>
                                         </tbody>
                                     </table>
+                                    <p class="bb-standings-rule"><?= $e('standings.tie_break_help') ?></p>
                                 </div>
                             </details>
                         </article>
                     <?php endforeach; ?>
                 </div>
             </section>
-        </main>
+        </div>
     </div>
 </div>
 <script>

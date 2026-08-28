@@ -36,7 +36,7 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
-$config = Config::load(__DIR__ . '/Config');
+$config = Config::load(__DIR__ . '/config');
 $timezone = $config['app']['timezone'] ?? null;
 if (is_string($timezone) && trim($timezone) !== '') {
     try {
