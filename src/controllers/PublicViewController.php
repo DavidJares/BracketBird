@@ -242,6 +242,11 @@ final class PublicViewController extends BaseController
                 $setsByMatchId,
                 (string) ($tournament['group_stage_mode'] ?? 'fixed_2_sets')
             );
+            $payload['advancingTeamIds'] = array_keys($this->advancingTeamIdSet(
+                $context['groups'],
+                $payload['groupStandingsByGroup'],
+                (int) ($tournament['advancing_teams_count'] ?? 0)
+            ));
             return $payload;
         }
 
@@ -310,7 +315,7 @@ final class PublicViewController extends BaseController
      */
     private function renderPublic(string $view, array $data): void
     {
-        $viewFile = __DIR__ . '/../Views/' . $view . '.php';
+        $viewFile = __DIR__ . '/../views/' . $view . '.php';
         if (!is_file($viewFile)) {
             throw new \RuntimeException(sprintf('View "%s" not found.', $view));
         }
@@ -322,15 +327,19 @@ final class PublicViewController extends BaseController
         $e = fn (string $key, array $params = []): string => htmlspecialchars($translator->translate($key, $params), ENT_QUOTES, 'UTF-8');
         $url = fn (string $path = '/'): string => $this->url($path);
         extract($data, EXTR_SKIP);
-        require __DIR__ . '/../Views/public/layout.php';
+        require __DIR__ . '/../views/public/layout.php';
     }
 
     private function absoluteCurrentUrl(): string
     {
-        $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
-        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
         $requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
-        return $scheme . '://' . $host . $requestUri;
+        $path = parse_url($requestUri, PHP_URL_PATH);
+        $query = parse_url($requestUri, PHP_URL_QUERY);
+        $path = is_string($path) && str_starts_with($path, '/') ? $path : '/';
+
+        return $this->canonicalOrigin()
+            . $path
+            . (is_string($query) && $query !== '' ? '?' . $query : '');
     }
 
     private function appTimezone(): \DateTimeZone
@@ -470,34 +479,11 @@ final class PublicViewController extends BaseController
             unset($row);
 
             $headToHead = $headToHeadByGroup[$groupId] ?? [];
-            usort($rows, static function (array $a, array $b) use ($headToHead): int {
-                $pointsCompare = (int) $b['tournament_points'] <=> (int) $a['tournament_points'];
-                if ($pointsCompare !== 0) {
-                    return $pointsCompare;
-                }
-
-                $idA = (int) $a['team_id'];
-                $idB = (int) $b['team_id'];
-                $pairKey = $idA < $idB ? ($idA . ':' . $idB) : ($idB . ':' . $idA);
-                $headToHeadValue = $headToHead[$pairKey] ?? 0;
-                if ($headToHeadValue !== 0) {
-                    if ($idA < $idB) {
-                        return $headToHeadValue === 1 ? -1 : 1;
-                    }
-                    return $headToHeadValue === -1 ? -1 : 1;
-                }
-
-                $pointDiffCompare = (int) $b['point_diff'] <=> (int) $a['point_diff'];
-                if ($pointDiffCompare !== 0) {
-                    return $pointDiffCompare;
-                }
-                $pointsForCompare = (int) $b['points_for'] <=> (int) $a['points_for'];
-                if ($pointsForCompare !== 0) {
-                    return $pointsForCompare;
-                }
-
-                return (int) $a['team_id'] <=> (int) $b['team_id'];
+            usort($rows, static function (array $a, array $b): int {
+                return ((int) $b['tournament_points'] <=> (int) $a['tournament_points'])
+                    ?: ((int) $a['team_id'] <=> (int) $b['team_id']);
             });
+            $rows = $this->resolveStandingsTieClusters($rows, $headToHead);
 
             foreach ($rows as $index => &$row) {
                 $row['position'] = $index + 1;
@@ -507,5 +493,126 @@ final class PublicViewController extends BaseController
         }
 
         return $sortedByGroup;
+    }
+
+    /**
+     * @param list<array<string, int|string>> $rows
+     * @param array<string, int> $headToHead
+     * @return list<array<string, int|string>>
+     */
+    private function resolveStandingsTieClusters(array $rows, array $headToHead): array
+    {
+        $metricComparator = static function (array $a, array $b): int {
+            return ((int) $b['point_diff'] <=> (int) $a['point_diff'])
+                ?: ((int) $b['points_for'] <=> (int) $a['points_for'])
+                ?: ((int) $a['team_id'] <=> (int) $b['team_id']);
+        };
+
+        $resolved = [];
+        $offset = 0;
+        while ($offset < count($rows)) {
+            $points = (int) ($rows[$offset]['tournament_points'] ?? 0);
+            $cluster = [];
+            while (
+                $offset < count($rows)
+                && (int) ($rows[$offset]['tournament_points'] ?? 0) === $points
+            ) {
+                $cluster[] = $rows[$offset];
+                $offset++;
+            }
+
+            if (count($cluster) === 2) {
+                usort($cluster, static function (array $a, array $b) use ($headToHead, $metricComparator): int {
+                    $idA = (int) ($a['team_id'] ?? 0);
+                    $idB = (int) ($b['team_id'] ?? 0);
+                    $pairKey = $idA < $idB ? ($idA . ':' . $idB) : ($idB . ':' . $idA);
+                    $headToHeadValue = (int) ($headToHead[$pairKey] ?? 0);
+                    if ($headToHeadValue !== 0) {
+                        if ($idA < $idB) {
+                            return $headToHeadValue === 1 ? -1 : 1;
+                        }
+
+                        return $headToHeadValue === -1 ? -1 : 1;
+                    }
+
+                    return $metricComparator($a, $b);
+                });
+            } elseif (count($cluster) > 1) {
+                usort($cluster, $metricComparator);
+            }
+
+            foreach ($cluster as $row) {
+                $resolved[] = $row;
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $groups
+     * @param array<int, list<array<string, int|string>>> $standingsByGroup
+     * @return array<int, bool>
+     */
+    private function advancingTeamIdSet(
+        array $groups,
+        array $standingsByGroup,
+        int $advancingTeamsCount
+    ): array {
+        $groupCount = count($groups);
+        if ($groupCount < 1 || $advancingTeamsCount < 1) {
+            return [];
+        }
+
+        $base = intdiv($advancingTeamsCount, $groupCount);
+        $remainingWildcards = $advancingTeamsCount % $groupCount;
+        $selected = [];
+        $wildcardCandidates = [];
+
+        foreach ($groups as $group) {
+            $groupId = (int) ($group['id'] ?? 0);
+            if ($groupId <= 0) {
+                continue;
+            }
+
+            foreach ($standingsByGroup[$groupId] ?? [] as $index => $row) {
+                $teamId = (int) ($row['team_id'] ?? 0);
+                if ($teamId <= 0) {
+                    continue;
+                }
+
+                if ($index < $base) {
+                    $selected[$teamId] = true;
+                } else {
+                    $wildcardCandidates[] = $row;
+                }
+            }
+        }
+
+        usort(
+            $wildcardCandidates,
+            static function (array $a, array $b): int {
+                return ((int) $b['tournament_points'] <=> (int) $a['tournament_points'])
+                    ?: ((int) $b['point_diff'] <=> (int) $a['point_diff'])
+                    ?: ((int) $b['points_for'] <=> (int) $a['points_for'])
+                    ?: ((int) $a['team_id'] <=> (int) $b['team_id']);
+            }
+        );
+
+        foreach ($wildcardCandidates as $candidate) {
+            if ($remainingWildcards <= 0) {
+                break;
+            }
+
+            $teamId = (int) ($candidate['team_id'] ?? 0);
+            if ($teamId <= 0 || isset($selected[$teamId])) {
+                continue;
+            }
+
+            $selected[$teamId] = true;
+            $remainingWildcards--;
+        }
+
+        return count($selected) === $advancingTeamsCount ? $selected : [];
     }
 }

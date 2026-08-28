@@ -14,7 +14,7 @@ final class Language
      */
     public static function available(): array
     {
-        $languages = require __DIR__ . '/../Config/languages.php';
+        $languages = require __DIR__ . '/../config/languages.php';
         if (!is_array($languages)) {
             return [];
         }

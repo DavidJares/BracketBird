@@ -8,6 +8,11 @@ use PDO;
 
 final class TournamentModel
 {
+    public const UPDATE_UPDATED = 'updated';
+    public const UPDATE_REQUIRES_MATCH_RESET = 'requires_match_reset';
+    public const UPDATE_NOT_FOUND = 'not_found';
+    public const UPDATE_STALE = 'stale';
+
     private Database $database;
 
     public function __construct(Database $database)
@@ -26,7 +31,7 @@ final class TournamentModel
                     match_duration_minutes, advancing_teams_count, group_stage_mode, knockout_mode, match_mode,
                     public_view_enabled, autoplay_enabled, rotation_interval_seconds, public_view_theme,
                     public_title_override, public_description, public_logo_path, public_map_url, public_map_embed_url,
-                    created_at
+                    created_at, state_version
              FROM tournaments
              ORDER BY created_at DESC, id DESC'
         );
@@ -41,14 +46,16 @@ final class TournamentModel
     public function create(array $data): int
     {
         $pdo = $this->database->pdo();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
-        $adminPasswordHash = password_hash((string) $data['admin_password'], PASSWORD_DEFAULT);
-        if (!is_string($adminPasswordHash) || $adminPasswordHash === '') {
-            throw new \RuntimeException('Password hashing failed.');
-        }
+        try {
+            $adminPasswordHash = password_hash((string) $data['admin_password'], PASSWORD_DEFAULT);
+            if (!is_string($adminPasswordHash) || $adminPasswordHash === '') {
+                throw new \RuntimeException('Password hashing failed.');
+            }
 
-        $statement = $pdo->prepare(
-            'INSERT INTO tournaments (
+            $statement = $pdo->prepare(
+                'INSERT INTO tournaments (
                 name,
                 slug,
                 event_date,
@@ -97,40 +104,45 @@ final class TournamentModel
                 NOW(),
                 NOW()
              )'
-        );
+            );
 
-        $statement->execute([
-            'name' => (string) $data['name'],
-            'slug' => (string) $data['slug'],
-            'event_date' => $this->nullIfEmpty((string) $data['event_date']),
-            'start_time' => $this->nullIfEmpty((string) $data['start_time']),
-            'location' => $this->nullIfEmpty((string) $data['location']),
-            'admin_password_hash' => $adminPasswordHash,
-            'number_of_groups' => (int) $data['number_of_groups'],
-            'number_of_courts' => (int) $data['number_of_courts'],
-            'match_duration_minutes' => (int) $data['match_duration_minutes'],
-            'advancing_teams_count' => (int) $data['advancing_teams_count'],
-            'group_stage_mode' => (string) $data['group_stage_mode'],
-            'knockout_mode' => (string) $data['knockout_mode'],
-            'match_mode' => (string) $data['group_stage_mode'],
-            'public_view_enabled' => (int) ($data['public_view_enabled'] ?? 0),
-            'autoplay_enabled' => (int) ($data['autoplay_enabled'] ?? 1),
-            'rotation_interval_seconds' => (int) ($data['rotation_interval_seconds'] ?? 15),
-            'public_title_override' => $this->nullIfEmpty((string) ($data['public_title_override'] ?? '')),
-            'public_description' => $this->nullIfEmpty((string) ($data['public_description'] ?? '')),
-            'public_logo_path' => $this->nullIfEmpty((string) ($data['public_logo_path'] ?? '')),
-            'public_map_url' => $this->nullIfEmpty((string) ($data['public_map_url'] ?? '')),
-            'public_map_embed_url' => $this->nullIfEmpty((string) ($data['public_map_embed_url'] ?? '')),
-        ]);
+            $statement->execute([
+                'name' => (string) $data['name'],
+                'slug' => (string) $data['slug'],
+                'event_date' => $this->nullIfEmpty((string) $data['event_date']),
+                'start_time' => $this->nullIfEmpty((string) $data['start_time']),
+                'location' => $this->nullIfEmpty((string) $data['location']),
+                'admin_password_hash' => $adminPasswordHash,
+                'number_of_groups' => (int) $data['number_of_groups'],
+                'number_of_courts' => (int) $data['number_of_courts'],
+                'match_duration_minutes' => (int) $data['match_duration_minutes'],
+                'advancing_teams_count' => (int) $data['advancing_teams_count'],
+                'group_stage_mode' => (string) $data['group_stage_mode'],
+                'knockout_mode' => (string) $data['knockout_mode'],
+                'match_mode' => (string) $data['group_stage_mode'],
+                'public_view_enabled' => (int) ($data['public_view_enabled'] ?? 0),
+                'autoplay_enabled' => (int) ($data['autoplay_enabled'] ?? 1),
+                'rotation_interval_seconds' => (int) ($data['rotation_interval_seconds'] ?? 15),
+                'public_title_override' => $this->nullIfEmpty((string) ($data['public_title_override'] ?? '')),
+                'public_description' => $this->nullIfEmpty((string) ($data['public_description'] ?? '')),
+                'public_logo_path' => $this->nullIfEmpty((string) ($data['public_logo_path'] ?? '')),
+                'public_map_url' => $this->nullIfEmpty((string) ($data['public_map_url'] ?? '')),
+                'public_map_embed_url' => $this->nullIfEmpty((string) ($data['public_map_embed_url'] ?? '')),
+            ]);
 
-        $tournamentId = (int) $pdo->lastInsertId();
-        $this->syncGroupNames($tournamentId, (int) $data['number_of_groups']);
-        $this->upsertPublicScreens(
-            $tournamentId,
-            $this->normalizePublicScreens($data['public_screens'] ?? [])
-        );
+            $tournamentId = (int) $pdo->lastInsertId();
+            $this->syncGroupNames($tournamentId, (int) $data['number_of_groups']);
+            $this->upsertPublicScreens(
+                $tournamentId,
+                $this->normalizePublicScreens($data['public_screens'] ?? [])
+            );
 
-        return $tournamentId;
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return $tournamentId;
+        } catch (\Throwable $throwable) {
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
+            throw $throwable;
+        }
     }
 
     /**
@@ -144,7 +156,7 @@ final class TournamentModel
                     match_duration_minutes, advancing_teams_count, group_stage_mode, knockout_mode, match_mode,
                     public_view_enabled, autoplay_enabled, rotation_interval_seconds, public_view_theme,
                     public_title_override, public_description, public_logo_path, public_map_url, public_map_embed_url,
-                    created_at, updated_at
+                    created_at, updated_at, state_version
              FROM tournaments
              WHERE id = :id
              LIMIT 1'
@@ -166,7 +178,7 @@ final class TournamentModel
                     match_duration_minutes, advancing_teams_count, group_stage_mode, knockout_mode, match_mode,
                     public_view_enabled, autoplay_enabled, rotation_interval_seconds, public_view_theme,
                     public_title_override, public_description, public_logo_path, public_map_url, public_map_embed_url,
-                    created_at, updated_at
+                    created_at, updated_at, state_version
              FROM tournaments
              WHERE slug = :slug
              LIMIT 1'
@@ -204,93 +216,206 @@ final class TournamentModel
         ];
     }
 
+    public function rehashAdminPassword(int $id, string $password, string $expectedHash): ?string
+    {
+        if ($id <= 0 || $password === '' || strlen($password) > 72 || $expectedHash === '') {
+            throw new \InvalidArgumentException('Invalid tournament password rehash input.');
+        }
+
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        if (!is_string($passwordHash) || $passwordHash === '') {
+            throw new \RuntimeException('Password hashing failed.');
+        }
+
+        $pdo = $this->database->pdo();
+        $statement = $pdo->prepare(
+            'UPDATE tournaments
+             SET admin_password_hash = :admin_password_hash,
+                 updated_at = NOW()
+             WHERE id = :id
+               AND admin_password_hash = :expected_hash'
+        );
+        $statement->execute([
+            'admin_password_hash' => $passwordHash,
+            'id' => $id,
+            'expected_hash' => $expectedHash,
+        ]);
+
+        return $statement->rowCount() === 1 ? $passwordHash : null;
+    }
+
     /**
      * @param array<string, mixed> $data
      */
-    public function update(int $id, array $data): void
+    public function update(
+        int $id,
+        array $data,
+        int $expectedStateVersion,
+        bool $structuralChange = false,
+        bool $confirmResetMatches = false
+    ): string
     {
         $pdo = $this->database->pdo();
-        $existing = $this->findById($id) ?? [];
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
-        $params = [
-            'id' => $id,
-            'name' => (string) $data['name'],
-            'slug' => (string) $data['slug'],
-            'event_date' => $this->nullIfEmpty((string) $data['event_date']),
-            'start_time' => $this->nullIfEmpty((string) $data['start_time']),
-            'location' => $this->nullIfEmpty((string) $data['location']),
-            'number_of_groups' => (int) $data['number_of_groups'],
-            'number_of_courts' => (int) $data['number_of_courts'],
-            'match_duration_minutes' => (int) $data['match_duration_minutes'],
-            'advancing_teams_count' => (int) $data['advancing_teams_count'],
-            'group_stage_mode' => (string) $data['group_stage_mode'],
-            'knockout_mode' => (string) $data['knockout_mode'],
-            'match_mode' => (string) $data['group_stage_mode'],
-            'public_view_enabled' => array_key_exists('public_view_enabled', $data)
-                ? (int) $data['public_view_enabled']
-                : ((int) ($existing['public_view_enabled'] ?? 0)),
-            'autoplay_enabled' => array_key_exists('autoplay_enabled', $data)
-                ? (int) $data['autoplay_enabled']
-                : ((int) ($existing['autoplay_enabled'] ?? 1)),
-            'rotation_interval_seconds' => array_key_exists('rotation_interval_seconds', $data)
-                ? (int) $data['rotation_interval_seconds']
-                : ((int) ($existing['rotation_interval_seconds'] ?? 15)),
-        ];
-
-        $passwordClause = '';
-        $rawPassword = (string) ($data['admin_password'] ?? '');
-        if ($rawPassword !== '') {
-            $passwordHash = password_hash($rawPassword, PASSWORD_DEFAULT);
-            if (!is_string($passwordHash) || $passwordHash === '') {
-                throw new \RuntimeException('Password hashing failed.');
+        try {
+            $currentStateVersion = $this->lockTournamentStateVersion($pdo, $id);
+            if ($currentStateVersion === null) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::UPDATE_NOT_FOUND;
+            }
+            if ($currentStateVersion !== $expectedStateVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::UPDATE_STALE;
             }
 
-            $passwordClause = ', admin_password_hash = :admin_password_hash';
-            $params['admin_password_hash'] = $passwordHash;
-        }
+            $existing = $this->findById($id) ?? [];
+            $structuralChange = $structuralChange || $this->hasStructuralDifference($existing, $data);
+            if ($structuralChange && $this->hasMatchesUsingPdo($pdo, $id)) {
+                if (!$confirmResetMatches) {
+                    $this->commitIfOwned($pdo, $ownsTransaction);
+                    return self::UPDATE_REQUIRES_MATCH_RESET;
+                }
 
-        $statement = $pdo->prepare(
-            'UPDATE tournaments
-                 SET name = :name,
-                 slug = :slug,
-                 event_date = :event_date,
-                 start_time = :start_time,
-                 location = :location,
-                 number_of_groups = :number_of_groups,
-                 number_of_courts = :number_of_courts,
-                 match_duration_minutes = :match_duration_minutes,
-                 advancing_teams_count = :advancing_teams_count,
-                 group_stage_mode = :group_stage_mode,
-                 knockout_mode = :knockout_mode,
-                 public_view_enabled = :public_view_enabled,
-                 autoplay_enabled = :autoplay_enabled,
-                 rotation_interval_seconds = :rotation_interval_seconds,
-                 match_mode = :match_mode,
-                 updated_at = NOW()' . $passwordClause . '
-             WHERE id = :id'
-        );
+                $deleteMatches = $pdo->prepare('DELETE FROM matches WHERE tournament_id = :tournament_id');
+                $deleteMatches->execute(['tournament_id' => $id]);
+            }
 
-        $statement->execute($params);
+            $params = [
+                'id' => $id,
+                'name' => (string) $data['name'],
+                'slug' => (string) $data['slug'],
+                'event_date' => $this->nullIfEmpty((string) $data['event_date']),
+                'start_time' => $this->nullIfEmpty((string) $data['start_time']),
+                'location' => $this->nullIfEmpty((string) $data['location']),
+                'number_of_groups' => (int) $data['number_of_groups'],
+                'number_of_courts' => (int) $data['number_of_courts'],
+                'match_duration_minutes' => (int) $data['match_duration_minutes'],
+                'advancing_teams_count' => (int) $data['advancing_teams_count'],
+                'group_stage_mode' => (string) $data['group_stage_mode'],
+                'knockout_mode' => (string) $data['knockout_mode'],
+                'match_mode' => (string) $data['group_stage_mode'],
+                'public_view_enabled' => array_key_exists('public_view_enabled', $data)
+                    ? (int) $data['public_view_enabled']
+                    : ((int) ($existing['public_view_enabled'] ?? 0)),
+                'autoplay_enabled' => array_key_exists('autoplay_enabled', $data)
+                    ? (int) $data['autoplay_enabled']
+                    : ((int) ($existing['autoplay_enabled'] ?? 1)),
+                'rotation_interval_seconds' => array_key_exists('rotation_interval_seconds', $data)
+                    ? (int) $data['rotation_interval_seconds']
+                    : ((int) ($existing['rotation_interval_seconds'] ?? 15)),
+            ];
 
-        $this->syncGroupNames($id, (int) $data['number_of_groups']);
-        if (array_key_exists('public_screens', $data)) {
-            $this->upsertPublicScreens(
-                $id,
-                $this->normalizePublicScreens($data['public_screens'])
+            $passwordClause = '';
+            $rawPassword = (string) ($data['admin_password'] ?? '');
+            if ($rawPassword !== '') {
+                $passwordHash = password_hash($rawPassword, PASSWORD_DEFAULT);
+                if (!is_string($passwordHash) || $passwordHash === '') {
+                    throw new \RuntimeException('Password hashing failed.');
+                }
+
+                $passwordClause = ', admin_password_hash = :admin_password_hash';
+                $params['admin_password_hash'] = $passwordHash;
+            }
+
+            $statement = $pdo->prepare(
+                'UPDATE tournaments
+                     SET name = :name,
+                     slug = :slug,
+                     event_date = :event_date,
+                     start_time = :start_time,
+                     location = :location,
+                     number_of_groups = :number_of_groups,
+                     number_of_courts = :number_of_courts,
+                     match_duration_minutes = :match_duration_minutes,
+                     advancing_teams_count = :advancing_teams_count,
+                     group_stage_mode = :group_stage_mode,
+                     knockout_mode = :knockout_mode,
+                     public_view_enabled = :public_view_enabled,
+                     autoplay_enabled = :autoplay_enabled,
+                     rotation_interval_seconds = :rotation_interval_seconds,
+                     match_mode = :match_mode,
+                     updated_at = NOW()' . $passwordClause . '
+                 WHERE id = :id'
             );
+
+            $statement->execute($params);
+
+            $this->syncGroupNames($id, (int) $data['number_of_groups']);
+            if (array_key_exists('public_screens', $data)) {
+                $this->upsertPublicScreens(
+                    $id,
+                    $this->normalizePublicScreens($data['public_screens'])
+                );
+            }
+            $this->bumpTournamentStateVersion($pdo, $id);
+
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::UPDATE_UPDATED;
+        } catch (\Throwable $throwable) {
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
+            throw $throwable;
         }
     }
 
-    public function deleteById(int $id): void
+    /**
+     * @return array{status: string, managed_logo_path: string}
+     */
+    public function deleteById(int $id, int $expectedStateVersion): array
     {
         $pdo = $this->database->pdo();
-        $statement = $pdo->prepare('DELETE FROM tournaments WHERE id = :id');
-        $statement->execute(['id' => $id]);
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
+
+        try {
+            $select = $pdo->prepare(
+                'SELECT public_logo_path, state_version
+                 FROM tournaments
+                 WHERE id = :id
+                 LIMIT 1
+                 FOR UPDATE'
+            );
+            $select->execute(['id' => $id]);
+            $row = $select->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return [
+                    'status' => self::UPDATE_NOT_FOUND,
+                    'managed_logo_path' => '',
+                ];
+            }
+            if ((int) ($row['state_version'] ?? -1) !== $expectedStateVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return [
+                    'status' => self::UPDATE_STALE,
+                    'managed_logo_path' => '',
+                ];
+            }
+
+            $statement = $pdo->prepare('DELETE FROM tournaments WHERE id = :id');
+            $statement->execute(['id' => $id]);
+            if ($statement->rowCount() !== 1) {
+                throw new \RuntimeException('Tournament deletion target disappeared.');
+            }
+
+            $managedLogoPath = (string) ($row['public_logo_path'] ?? '');
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return [
+                'status' => self::UPDATE_UPDATED,
+                'managed_logo_path' => $managedLogoPath,
+            ];
+        } catch (\Throwable $throwable) {
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
+            throw $throwable;
+        }
     }
 
     public function generateUniqueSlug(string $name, ?int $excludeTournamentId = null): string
     {
         $base = self::slugify($name);
+        if ($base === '') {
+            $base = 'tournament';
+        }
+        $base = rtrim(substr($base, 0, 140), '-');
         if ($base === '') {
             $base = 'tournament';
         }
@@ -365,25 +490,54 @@ final class TournamentModel
     }
 
     /**
-     * @param array<string, array{is_enabled: int, sort_order: int}>|null $screensByKey
+     * @return array{status: string, previous_logo_path: string}
      */
     public function savePublicViewSettings(
         int $tournamentId,
+        int $expectedStateVersion,
         bool $publicViewEnabled,
         bool $autoplayEnabled,
         int $rotationIntervalSeconds,
         string $publicViewTheme,
         string $publicTitleOverride,
         string $publicDescription,
-        string $publicLogoPath,
+        ?string $replacementLogoPath,
         string $publicMapUrl,
-        string $publicMapEmbedUrl,
-        ?array $screensByKey
-    ): void {
+        string $publicMapEmbedUrl
+    ): array {
         $pdo = $this->database->pdo();
-        $pdo->beginTransaction();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
 
         try {
+            $select = $pdo->prepare(
+                'SELECT state_version, public_logo_path
+                 FROM tournaments
+                 WHERE id = :id
+                 LIMIT 1
+                 FOR UPDATE'
+            );
+            $select->execute(['id' => $tournamentId]);
+            $lockedTournament = $select->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($lockedTournament)) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return [
+                    'status' => self::UPDATE_NOT_FOUND,
+                    'previous_logo_path' => '',
+                ];
+            }
+
+            $previousLogoPath = trim((string) ($lockedTournament['public_logo_path'] ?? ''));
+            if ((int) ($lockedTournament['state_version'] ?? -1) !== $expectedStateVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return [
+                    'status' => self::UPDATE_STALE,
+                    'previous_logo_path' => $previousLogoPath,
+                ];
+            }
+            $publicLogoPath = $replacementLogoPath === null
+                ? $previousLogoPath
+                : trim($replacementLogoPath);
+
             $updateTournament = $pdo->prepare(
                 'UPDATE tournaments
                  SET public_view_enabled = :public_view_enabled,
@@ -411,15 +565,51 @@ final class TournamentModel
                 'id' => $tournamentId,
             ]);
 
-            if (is_array($screensByKey)) {
-                $this->upsertPublicScreens($tournamentId, $screensByKey, $pdo);
-            }
-            $pdo->commit();
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return [
+                'status' => self::UPDATE_UPDATED,
+                'previous_logo_path' => $previousLogoPath,
+            ];
         } catch (\Throwable $throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
+            throw $throwable;
+        }
+    }
+
+    /**
+     * @param array<string, array{is_enabled: int, sort_order: int}> $screensByKey
+     */
+    public function savePublicScreens(
+        int $tournamentId,
+        int $expectedStateVersion,
+        array $screensByKey
+    ): string
+    {
+        $pdo = $this->database->pdo();
+        $ownsTransaction = $this->beginTransactionIfNeeded($pdo);
+
+        try {
+            $currentStateVersion = $this->lockTournamentStateVersion($pdo, $tournamentId);
+            if ($currentStateVersion === null) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::UPDATE_NOT_FOUND;
+            }
+            if ($currentStateVersion !== $expectedStateVersion) {
+                $this->commitIfOwned($pdo, $ownsTransaction);
+                return self::UPDATE_STALE;
             }
 
+            $this->upsertPublicScreens(
+                $tournamentId,
+                $this->normalizePublicScreens($screensByKey),
+                $pdo
+            );
+            $this->bumpTournamentStateVersion($pdo, $tournamentId);
+            $this->commitIfOwned($pdo, $ownsTransaction);
+            return self::UPDATE_UPDATED;
+        } catch (\Throwable $throwable) {
+            $this->rollBackIfOwned($pdo, $ownsTransaction);
             throw $throwable;
         }
     }
@@ -646,5 +836,107 @@ final class TournamentModel
                 'sort_order' => max(1, min(99, (int) ($screenSettings['sort_order'] ?? 1))),
             ]);
         }
+    }
+
+    private function beginTransactionIfNeeded(PDO $pdo): bool
+    {
+        if ($pdo->inTransaction()) {
+            return false;
+        }
+
+        $pdo->beginTransaction();
+        return true;
+    }
+
+    private function commitIfOwned(PDO $pdo, bool $ownsTransaction): void
+    {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+    }
+
+    private function rollBackIfOwned(PDO $pdo, bool $ownsTransaction): void
+    {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+
+    private function lockTournament(PDO $pdo, int $tournamentId): bool
+    {
+        $statement = $pdo->prepare(
+            'SELECT id
+             FROM tournaments
+             WHERE id = :id
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $statement->execute(['id' => $tournamentId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    private function lockTournamentStateVersion(PDO $pdo, int $tournamentId): ?int
+    {
+        $statement = $pdo->prepare(
+            'SELECT state_version
+             FROM tournaments
+             WHERE id = :id
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $statement->execute(['id' => $tournamentId]);
+        $stateVersion = $statement->fetchColumn();
+
+        return $stateVersion === false ? null : (int) $stateVersion;
+    }
+
+    private function hasMatchesUsingPdo(PDO $pdo, int $tournamentId): bool
+    {
+        $statement = $pdo->prepare(
+            'SELECT id
+             FROM matches
+             WHERE tournament_id = :tournament_id
+             LIMIT 1'
+        );
+        $statement->execute(['tournament_id' => $tournamentId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    private function bumpTournamentStateVersion(PDO $pdo, int $tournamentId): void
+    {
+        $statement = $pdo->prepare(
+            'UPDATE tournaments
+             SET state_version = state_version + 1
+             WHERE id = :id'
+        );
+        $statement->execute(['id' => $tournamentId]);
+        if ($statement->rowCount() !== 1) {
+            throw new \RuntimeException('Tournament state version could not be advanced.');
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $existing
+     * @param array<string, mixed> $data
+     */
+    private function hasStructuralDifference(array $existing, array $data): bool
+    {
+        $existingStartTime = (string) ($existing['start_time'] ?? '');
+        if (preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $existingStartTime) === 1) {
+            $existingStartTime = substr($existingStartTime, 0, 5);
+        }
+
+        return (string) ($existing['event_date'] ?? '') !== (string) ($data['event_date'] ?? '')
+            || $existingStartTime !== (string) ($data['start_time'] ?? '')
+            || (int) ($existing['number_of_groups'] ?? 0) !== (int) ($data['number_of_groups'] ?? 0)
+            || (int) ($existing['number_of_courts'] ?? 0) !== (int) ($data['number_of_courts'] ?? 0)
+            || (int) ($existing['match_duration_minutes'] ?? 0) !== (int) ($data['match_duration_minutes'] ?? 0)
+            || (int) ($existing['advancing_teams_count'] ?? 0) !== (int) ($data['advancing_teams_count'] ?? 0)
+            || (string) ($existing['group_stage_mode'] ?? ($existing['match_mode'] ?? ''))
+                !== (string) ($data['group_stage_mode'] ?? '')
+            || (string) ($existing['knockout_mode'] ?? '')
+                !== (string) ($data['knockout_mode'] ?? '');
     }
 }

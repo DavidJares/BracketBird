@@ -7,8 +7,15 @@ declare(strict_types=1);
 /** @var string $createTeamActionUrl */
 /** @var string $updateTeamActionUrl */
 /** @var string $deleteTeamActionUrl */
+/** @var bool $hasAnyMatches */
 
 $tournamentId = (int) ($tournament['id'] ?? 0);
+$stateVersion = max(0, (int) ($tournament['state_version'] ?? 0));
+$hasAnyMatches = (bool) ($hasAnyMatches ?? false);
+$teamLimitReached = count($teams) >= 64;
+$deleteConfirmation = $hasAnyMatches
+    ? $t('teams.delete_team_with_matches_confirm')
+    : $t('teams.delete_team_confirm');
 ?>
 <div class="bb-workspace">
     <div class="bb-workspace-header">
@@ -19,6 +26,12 @@ $tournamentId = (int) ($tournament['id'] ?? 0);
         </div>
         <span class="bb-status-pill"><?= $e('teams.count', ['count' => count($teams)]) ?></span>
     </div>
+
+    <?php if ($hasAnyMatches): ?>
+        <div class="alert alert-warning" role="alert">
+            <?= $e('teams.match_reset_warning') ?>
+        </div>
+    <?php endif; ?>
 
     <div class="bb-workspace-grid bb-workspace-grid-narrow">
         <aside class="bb-workspace-side">
@@ -34,18 +47,21 @@ $tournamentId = (int) ($tournament['id'] ?? 0);
                     <input type="hidden" name="return_section" value="teams">
                     <div>
                         <label for="team_name_new" class="form-label"><?= $e('teams.team_name') ?></label>
-                        <input type="text" name="team_name" id="team_name_new" class="form-control" required maxlength="150">
+                        <input type="text" name="team_name" id="team_name_new" class="form-control" required maxlength="150" <?= $teamLimitReached ? 'disabled' : '' ?>>
                     </div>
                     <div>
                         <label for="team_description_new" class="form-label"><?= $e('teams.description_optional') ?></label>
-                        <textarea name="description" id="team_description_new" class="form-control" rows="3" maxlength="1000"></textarea>
+                        <textarea name="description" id="team_description_new" class="form-control" rows="3" maxlength="1000" <?= $teamLimitReached ? 'disabled' : '' ?>></textarea>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100"><?= $e('teams.add_team') ?></button>
+                    <?php if ($teamLimitReached): ?>
+                        <div class="form-text text-warning"><?= $e('teams.team_limit_reached') ?></div>
+                    <?php endif; ?>
+                    <button type="submit" class="btn btn-primary w-100" <?= $teamLimitReached ? 'disabled' : '' ?>><?= $e('teams.add_team') ?></button>
                 </form>
             </section>
         </aside>
 
-        <main class="bb-workspace-main">
+        <div class="bb-workspace-main">
             <section class="bb-workspace-card">
                 <div class="bb-workspace-card-header">
                     <div>
@@ -77,6 +93,7 @@ $tournamentId = (int) ($tournament['id'] ?? 0);
                                 <div class="bb-team-edit-panel">
                                     <form method="post" action="<?= htmlspecialchars($updateTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-team-edit-form">
                                         <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                                        <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                                         <input type="hidden" name="team_id" value="<?= $teamId ?>">
                                         <input type="hidden" name="return_section" value="teams">
                                         <div>
@@ -91,11 +108,15 @@ $tournamentId = (int) ($tournament['id'] ?? 0);
                                             <button type="submit" class="btn btn-sm btn-primary"><?= $e('teams.save_team') ?></button>
                                         </div>
                                     </form>
-                                    <form method="post" action="<?= htmlspecialchars($deleteTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($t('teams.delete_team_confirm')), ENT_QUOTES, 'UTF-8') ?>);" class="bb-team-delete-form">
+                                    <form method="post" action="<?= htmlspecialchars($deleteTeamActionUrl, ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm(<?= htmlspecialchars(json_encode($deleteConfirmation), ENT_QUOTES, 'UTF-8') ?>);" class="bb-team-delete-form">
                                         <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+                                        <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
                                         <input type="hidden" name="team_id" value="<?= $teamId ?>">
                                         <input type="hidden" name="confirm_delete" value="1">
                                         <input type="hidden" name="return_section" value="teams">
+                                        <?php if ($hasAnyMatches): ?>
+                                            <input type="hidden" name="confirm_reset_matches" value="1">
+                                        <?php endif; ?>
                                         <button type="submit" class="btn btn-sm btn-outline-danger"><?= $e('teams.delete_team') ?></button>
                                     </form>
                                 </div>
@@ -104,6 +125,6 @@ $tournamentId = (int) ($tournament['id'] ?? 0);
                     <?php endforeach; ?>
                 </div>
             </section>
-        </main>
+        </div>
     </div>
 </div>

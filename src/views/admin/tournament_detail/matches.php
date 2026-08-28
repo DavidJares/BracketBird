@@ -7,6 +7,7 @@ declare(strict_types=1);
  *     unassigned_count: int
  * } $groupAssignment */
 /** @var bool $hasGroupMatches */
+/** @var bool $hasKnockoutMatches */
 /** @var string $generateGroupMatchesActionUrl */
 /** @var string $matchesFilterActionUrl */
 /** @var list<array<string, mixed>> $groupMatches */
@@ -19,12 +20,17 @@ declare(strict_types=1);
 $tournamentId = (int) ($tournament['id'] ?? 0);
 $hasUnassignedTeams = (int) ($groupAssignment['unassigned_count'] ?? 0) > 0;
 $hasExistingGroupMatches = isset($hasGroupMatches) && $hasGroupMatches;
+$hasExistingKnockoutMatches = isset($hasKnockoutMatches) && $hasKnockoutMatches;
+$hasExistingMatches = $hasExistingGroupMatches || $hasExistingKnockoutMatches;
 $generateConfirmMessageParts = [];
 if ($hasUnassignedTeams) {
     $generateConfirmMessageParts[] = $t('group_stage.unassigned_skipped');
 }
 if ($hasExistingGroupMatches) {
     $generateConfirmMessageParts[] = $t('group_stage.existing_matches_replaced');
+}
+if ($hasExistingKnockoutMatches) {
+    $generateConfirmMessageParts[] = $t('group_stage.knockout_matches_removed');
 }
 $generateConfirmMessage = implode(' ', $generateConfirmMessageParts);
 $generateFormOnSubmit = $generateConfirmMessage !== '' ? 'return confirm(' . htmlspecialchars(json_encode($generateConfirmMessage . ' ' . $t('common.continue_question')), ENT_QUOTES, 'UTF-8') . ');' : '';
@@ -100,21 +106,53 @@ $renderTeamName = static function (string $teamName, bool $isWinner) use ($e): v
 
 $renderStartAction = static function (array $match, string $status, int $tournamentId, int $selectedGroupFilter, int $selectedCourtFilter) use ($e): void {
     if ($status !== 'scheduled') {
+        $detailUrl = (string) ($match['detail_url'] ?? '');
+        $actionLabel = $status === 'in_progress'
+            ? $e('group_stage.enter_score')
+            : ($status === 'finished' ? $e('group_stage.edit_result') : $e('group_stage.open_match'));
         ?>
-        <span class="text-muted small"><?= $e('common.open_detail') ?></span>
+        <?php if ($detailUrl !== ''): ?>
+            <a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm <?= $status === 'in_progress' ? 'btn-primary' : 'btn-outline-secondary' ?>"><?= $actionLabel ?></a>
+        <?php else: ?>
+            <span class="text-muted small"><?= $e('common.open_detail') ?></span>
+        <?php endif; ?>
         <?php
         return;
     }
     ?>
-    <form method="post" action="<?= htmlspecialchars((string) ($match['start_action_url'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" class="m-0 js-match-action">
-        <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
-        <input type="hidden" name="group_id" value="<?= $selectedGroupFilter ?>">
-        <input type="hidden" name="court" value="<?= $selectedCourtFilter ?>">
-        <input type="hidden" name="return_to" value="matches">
-        <button type="submit" class="btn btn-sm btn-outline-primary"><?= $e('common.start') ?></button>
-    </form>
+    <div class="bb-match-actions-inline">
+        <form method="post" action="<?= htmlspecialchars((string) ($match['start_action_url'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" class="m-0">
+            <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+            <input type="hidden" name="group_id" value="<?= $selectedGroupFilter ?>">
+            <input type="hidden" name="court" value="<?= $selectedCourtFilter ?>">
+            <input type="hidden" name="return_to" value="matches">
+            <input type="hidden" name="lock_version" value="<?= (int) ($match['lock_version'] ?? 0) ?>">
+            <button type="submit" class="btn btn-sm btn-outline-primary"><?= $e('common.start') ?></button>
+        </form>
+        <?php if ((string) ($match['detail_url'] ?? '') !== ''): ?>
+            <a href="<?= htmlspecialchars((string) $match['detail_url'], ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-outline-secondary"><?= $e('group_stage.open_match') ?></a>
+        <?php endif; ?>
+    </div>
     <?php
 };
+
+$liveMatches = array_values(array_filter(
+    $groupMatches,
+    static fn (array $match): bool => (string) ($match['status'] ?? '') === 'in_progress'
+));
+$nextMatchesByCourt = [];
+foreach ($groupMatches as $candidateMatch) {
+    if ((string) ($candidateMatch['status'] ?? '') !== 'scheduled') {
+        continue;
+    }
+
+    $candidateCourt = (int) ($candidateMatch['court_number'] ?? 0);
+    if ($candidateCourt <= 0 || isset($nextMatchesByCourt[$candidateCourt])) {
+        continue;
+    }
+
+    $nextMatchesByCourt[$candidateCourt] = $candidateMatch;
+}
 ?>
 <div class="bb-workspace bb-stage-workspace">
     <header class="bb-workspace-header">
@@ -125,6 +163,11 @@ $renderStartAction = static function (array $match, string $status, int $tournam
         </div>
     </header>
 
+    <details class="bb-stage-generation" <?= !$hasExistingGroupMatches ? 'open' : '' ?>>
+        <summary>
+            <span><?= $e('group_stage.generation') ?></span>
+            <strong><?= $e('group_stage.generate_matches') ?></strong>
+        </summary>
     <section class="bb-stage-action-card">
         <div class="bb-stage-action-copy">
             <span class="bb-settings-eyebrow"><?= $e('group_stage.generation') ?></span>
@@ -142,19 +185,78 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                     <?= $e('group_stage.existing_generation_warning') ?>
                 </div>
             <?php endif; ?>
+            <?php if ($hasExistingKnockoutMatches): ?>
+                <div class="alert alert-warning py-2 mb-2 small" role="alert">
+                    <?= $e('group_stage.knockout_generation_warning') ?>
+                </div>
+            <?php endif; ?>
             <form method="post" action="<?= htmlspecialchars($generateGroupMatchesActionUrl, ENT_QUOTES, 'UTF-8') ?>"<?= $generateFormOnSubmit !== '' ? ' onsubmit="' . $generateFormOnSubmit . '"' : '' ?>>
                 <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                 <input type="hidden" name="return_section" value="matches">
                 <?php if ($hasUnassignedTeams): ?>
                     <input type="hidden" name="confirm_unassigned" value="1">
                 <?php endif; ?>
-                <?php if ($hasExistingGroupMatches): ?>
-                    <input type="hidden" name="confirm_regenerate" value="1">
+                <?php if ($hasExistingMatches): ?>
+                    <label class="form-check small text-warning mb-2">
+                        <input class="form-check-input" type="checkbox" name="confirm_regenerate" value="1" required>
+                        <span class="form-check-label"><?= $e('group_stage.confirm_regenerate') ?></span>
+                    </label>
                 <?php endif; ?>
                 <button type="submit" class="btn btn-primary w-100"><?= $e('group_stage.generate_group_stage_matches') ?></button>
             </form>
         </div>
     </section>
+    </details>
+
+    <?php if ($groupMatchesTotalCount > 0): ?>
+        <section class="bb-live-desk" aria-labelledby="live-desk-title">
+            <div class="bb-live-desk-heading">
+                <div>
+                    <span class="bb-section-kicker"><?= $e('group_stage.live_desk') ?></span>
+                    <h3 id="live-desk-title"><?= $e('group_stage.live_desk') ?></h3>
+                </div>
+                <p><?= $e('group_stage.live_desk_help') ?></p>
+            </div>
+            <div class="bb-live-desk-grid">
+                <?php foreach ($liveMatches as $liveMatch): ?>
+                    <?php $liveView = $matchViewData($liveMatch); ?>
+                    <article class="bb-live-match-card is-live">
+                        <div class="bb-live-match-top">
+                            <span class="bb-live-indicator"><span aria-hidden="true"></span><?= $e('group_stage.live_now') ?></span>
+                            <strong><?= (int) ($liveMatch['court_number'] ?? 0) > 0 ? $e('common.court_number', ['number' => (int) $liveMatch['court_number']]) : '-' ?></strong>
+                        </div>
+                        <div class="bb-live-match-teams">
+                            <span><?= htmlspecialchars((string) ($liveMatch['team_a_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
+                            <b aria-hidden="true">×</b>
+                            <span><?= htmlspecialchars((string) ($liveMatch['team_b_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
+                        </div>
+                        <a href="<?= htmlspecialchars((string) $liveView['detail_url'], ENT_QUOTES, 'UTF-8') ?>" class="btn btn-primary btn-sm"><?= $e('group_stage.enter_score') ?></a>
+                    </article>
+                <?php endforeach; ?>
+
+                <?php foreach ($nextMatchesByCourt as $nextMatch): ?>
+                    <?php $nextView = $matchViewData($nextMatch); ?>
+                    <article class="bb-live-match-card">
+                        <div class="bb-live-match-top">
+                            <span><?= $e('group_stage.ready_next') ?></span>
+                            <strong><?= $e('common.court_number', ['number' => (int) $nextMatch['court_number']]) ?></strong>
+                        </div>
+                        <div class="bb-live-match-time"><?= htmlspecialchars((string) $nextView['planned_start'], ENT_QUOTES, 'UTF-8') ?></div>
+                        <div class="bb-live-match-teams">
+                            <span><?= htmlspecialchars((string) ($nextMatch['team_a_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
+                            <b aria-hidden="true">×</b>
+                            <span><?= htmlspecialchars((string) ($nextMatch['team_b_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
+                        </div>
+                        <?php $renderStartAction($nextMatch, 'scheduled', $tournamentId, $selectedGroupFilter, $selectedCourtFilter); ?>
+                    </article>
+                <?php endforeach; ?>
+
+                <?php if (count($liveMatches) === 0 && count($nextMatchesByCourt) === 0): ?>
+                    <div class="bb-empty-state"><?= $e('group_stage.no_live_matches') ?></div>
+                <?php endif; ?>
+            </div>
+        </section>
+    <?php endif; ?>
 
     <?php if ($groupMatchesTotalCount > 0): ?>
         <section class="bb-stage-toolbar">
@@ -185,6 +287,12 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                 <button type="submit" class="btn btn-sm btn-primary"><?= $e('common.filter') ?></button>
                 <a href="<?= htmlspecialchars($matchesFilterActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-outline-secondary"><?= $e('common.reset') ?></a>
             </form>
+            <div class="bb-status-filter" role="group" aria-label="<?= $e('group_stage.filter_status') ?>">
+                <button type="button" class="btn btn-sm btn-primary" data-match-status-filter="all" aria-pressed="true"><?= $e('group_stage.filter_all') ?></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-match-status-filter="in_progress" aria-pressed="false"><?= $e('group_stage.filter_live') ?></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-match-status-filter="scheduled" aria-pressed="false"><?= $e('group_stage.filter_ready') ?></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-match-status-filter="finished" aria-pressed="false"><?= $e('group_stage.filter_finished') ?></button>
+            </div>
         </section>
     <?php endif; ?>
 
@@ -208,6 +316,7 @@ $renderStartAction = static function (array $match, string $status, int $tournam
         <?php else: ?>
             <div class="bb-admin-match-table-wrap">
                 <table class="table table-sm mb-0 align-middle bb-admin-match-table">
+                    <caption class="visually-hidden"><?= $e('group_stage.table_caption') ?></caption>
                     <colgroup>
                         <col class="bb-match-col-order">
                         <col class="bb-match-col-group">
@@ -220,14 +329,14 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                     </colgroup>
                     <thead>
                     <tr>
-                        <th><?= $e('common.order') ?></th>
-                        <th><?= $e('teams_groups.group') ?></th>
-                        <th><?= $e('print.match') ?></th>
-                        <th><?= $e('print.result') ?></th>
-                        <th><?= $e('print.court') ?></th>
-                        <th><?= $e('print.start') ?></th>
-                        <th><?= $e('common.status') ?></th>
-                        <th class="text-end"><?= $e('common.action') ?></th>
+                        <th scope="col"><?= $e('common.order') ?></th>
+                        <th scope="col"><?= $e('teams_groups.group') ?></th>
+                        <th scope="col"><?= $e('print.match') ?></th>
+                        <th scope="col"><?= $e('print.result') ?></th>
+                        <th scope="col"><?= $e('print.court') ?></th>
+                        <th scope="col"><?= $e('print.start') ?></th>
+                        <th scope="col"><?= $e('common.status') ?></th>
+                        <th scope="col" class="text-end"><?= $e('common.action') ?></th>
                     </tr>
                     </thead>
                     <tbody>
@@ -238,7 +347,7 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                         $teamAName = (string) ($match['team_a_name'] ?? '-');
                         $teamBName = (string) ($match['team_b_name'] ?? '-');
                         ?>
-                        <tr<?= $detailUrl !== '' ? ' class="js-match-row bb-admin-match-row" data-href="' . htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') . '"' : ' class="bb-admin-match-row"' ?>>
+                        <tr class="bb-admin-match-row" data-match-status="<?= htmlspecialchars((string) $view['status'], ENT_QUOTES, 'UTF-8') ?>">
                             <td><span class="bb-admin-match-order"><?= (int) ($match['schedule_order'] ?? 0) ?></span></td>
                             <td><?= htmlspecialchars((string) ($match['group_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></td>
                             <td>
@@ -279,7 +388,7 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                     $teamAName = (string) ($match['team_a_name'] ?? '-');
                     $teamBName = (string) ($match['team_b_name'] ?? '-');
                     ?>
-                    <article class="bb-admin-match-card<?= $detailUrl !== '' ? ' js-match-card' : '' ?>"<?= $detailUrl !== '' ? ' data-href="' . htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
+                    <article class="bb-admin-match-card" data-match-status="<?= htmlspecialchars((string) $view['status'], ENT_QUOTES, 'UTF-8') ?>">
                         <div class="bb-admin-match-card-top">
                             <span class="bb-admin-match-order">#<?= (int) ($match['schedule_order'] ?? 0) ?></span>
                             <span><?= htmlspecialchars((string) ($match['group_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></span>
@@ -316,26 +425,35 @@ $renderStartAction = static function (array $match, string $status, int $tournam
                     </article>
                 <?php endforeach; ?>
             </div>
+            <div class="bb-empty-state d-none" id="js-match-status-empty" role="status"><?= $e('group_stage.no_status_matches') ?></div>
         <?php endif; ?>
     </section>
 </div>
 <script>
     (function () {
-        var openTarget = function (container, event) {
-            if (event.target.closest('.js-match-action, a, button, input, select, textarea')) {
-                return;
-            }
-
-            var href = container.getAttribute('data-href');
-            if (href) {
-                window.location.href = href;
-            }
-        };
-
-        document.querySelectorAll('.js-match-row, .js-match-card').forEach(function (item) {
-            item.style.cursor = 'pointer';
-            item.addEventListener('click', function (event) {
-                openTarget(item, event);
+        var statusButtons = Array.prototype.slice.call(document.querySelectorAll('[data-match-status-filter]'));
+        var statusItems = Array.prototype.slice.call(document.querySelectorAll('[data-match-status]'));
+        var statusEmpty = document.getElementById('js-match-status-empty');
+        statusButtons.forEach(function (button) {
+            button.addEventListener('click', function () {
+                var selectedStatus = button.getAttribute('data-match-status-filter') || 'all';
+                var visibleItems = 0;
+                statusItems.forEach(function (item) {
+                    var visible = selectedStatus === 'all' || item.getAttribute('data-match-status') === selectedStatus;
+                    item.hidden = !visible;
+                    if (visible) {
+                        visibleItems++;
+                    }
+                });
+                statusButtons.forEach(function (candidate) {
+                    var active = candidate === button;
+                    candidate.classList.toggle('btn-primary', active);
+                    candidate.classList.toggle('btn-outline-secondary', !active);
+                    candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
+                });
+                if (statusEmpty) {
+                    statusEmpty.classList.toggle('d-none', visibleItems > 0);
+                }
             });
         });
     })();

@@ -1,10 +1,25 @@
+Options -Indexes
 RewriteEngine On
 
-# Shared-hosting fallback when the document root points at the project root
-# instead of the public/ directory.
-RewriteRule ^assets/(.*)$ public/assets/$1 [L]
-RewriteRule ^uploads/(.*)$ public/uploads/$1 [L]
+# Shared-hosting fallback when the document root points at the project root.
+# Only public assets, managed uploads, and the front controller are reachable.
+RewriteRule (^|/)\. - [F,L,NC]
+# `/public/{slug}/...` is an application route, not access to the physical
+# public/ directory. Keep the route allowlist in sync with public/index.php.
+RewriteRule ^public/[^/]+/(?:overview|next|standings|schedule|knockout|results|display)/?$ public/index.php [L,QSA,NC]
+RewriteRule ^(?:src|storage|scripts|docs|resources)(?:/|$) - [F,L,NC]
+RewriteRule (?:^|/)(?:AGENTS\.md|README\.md|composer\.(?:json|lock)|package(?:-lock)?\.json)$ - [F,L,NC]
+RewriteRule (?:\.(?:bak|conf|crt|env|gz|ini|key|lock|log|old|orig|pem|save|sql|sqlite|swp|tar|ya?ml|zip)|~)$ - [F,L,NC]
 
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
+# Some shared hosts expose this project directory directly and serve the app
+# from the visible /public URL base. Allow that existing deployment layout;
+# public/.htaccess still routes requests through public/index.php.
+
+# Allow real root files after the protected paths have been rejected.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteRule ^assets(?:/(.*))?$ public/assets/$1 [L]
+RewriteRule ^uploads(?:/(.*))?$ public/uploads/$1 [L]
 RewriteRule ^ public/index.php [L,QSA]

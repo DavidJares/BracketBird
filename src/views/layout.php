@@ -13,7 +13,6 @@ $sidebarSectionLabels = [
     'matches' => 'nav.group_stage',
     'knockout' => 'nav.knockout',
     'public_view' => 'nav.public_view',
-    'teams' => 'nav.teams',
     'exports' => 'nav.exports_print',
 ];
 $sidebarTournament = is_array($tournament ?? null) ? $tournament : null;
@@ -75,30 +74,36 @@ $translate = is_callable($t ?? null)
 $escape = is_callable($e ?? null)
     ? $e
     : static fn (string $key, array $params = []): string => htmlspecialchars($key, ENT_QUOTES, 'UTF-8');
+$isAuthenticatedShell = is_array($currentSuperadmin ?? null) || is_array($currentTournamentAdmin ?? null);
+$isAuthShell = !$isAuthenticatedShell && count($sidebarSectionNav) === 0;
+$flashRole = $flashType === 'error' ? 'alert' : 'status';
+$flashLive = $flashType === 'error' ? 'assertive' : 'polite';
 ?>
 <!doctype html>
-<html lang="<?= htmlspecialchars($layoutCurrentLanguage, ENT_QUOTES, 'UTF-8') ?>" class="bb-theme-dark">
+<html lang="<?= htmlspecialchars($layoutCurrentLanguage, ENT_QUOTES, 'UTF-8') ?>" class="bb-theme-light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?></title>
+    <title><?= htmlspecialchars($pageTitle . ' · ' . $appName, ENT_QUOTES, 'UTF-8') ?></title>
     <script>
         (function () {
             try {
-                var theme = localStorage.getItem('bracketbird.adminTheme') || 'dark';
+                var theme = localStorage.getItem('bracketbird.adminTheme') || 'light';
                 document.documentElement.className = document.documentElement.className.replace(/\bbb-theme-(dark|light)\b/g, '').trim();
                 document.documentElement.classList.add(theme === 'light' ? 'bb-theme-light' : 'bb-theme-dark');
             } catch (error) {
-                document.documentElement.classList.add('bb-theme-dark');
+                document.documentElement.classList.add('bb-theme-light');
             }
         })();
     </script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="<?= htmlspecialchars($url('/assets/css/bracketbird.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
 </head>
-<body class="bb-admin-body">
+<body class="bb-admin-body<?= $isAuthShell ? ' bb-auth-body' : '' ?>">
+<a class="bb-skip-link" href="#main-content"><?= $escape('layout.skip_to_content') ?></a>
 <div class="bb-app-shell">
+    <?php if (!$isAuthShell): ?>
     <aside class="bb-sidebar" aria-label="<?= $escape('layout.primary_navigation') ?>">
         <a class="bb-brand" href="<?= htmlspecialchars($brandHref, ENT_QUOTES, 'UTF-8') ?>">
             <span class="bb-brand-mark">BB</span>
@@ -111,18 +116,17 @@ $escape = is_callable($e ?? null)
             <?php if (count($sidebarSectionNav) > 0): ?>
                 <?php if ($sidebarTournamentName !== ''): ?>
                     <div class="bb-side-context">
-                        <span class="bb-side-context-label"><?= $escape('nav.tournament') ?></span>
+                        <span class="bb-side-context-label"><?= $escape('layout.tournament_administration') ?></span>
                         <span class="bb-side-context-name"><?= htmlspecialchars($sidebarTournamentName, ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
                 <?php endif; ?>
-                <?php foreach ($sidebarSectionLabels as $sectionKey => $sectionLabel): ?>
-                    <?php $sectionHref = (string) ($sidebarSectionNav[$sectionKey] ?? '#'); ?>
-                    <a class="bb-side-link <?= $sidebarActiveSection === $sectionKey ? 'active' : '' ?>" href="<?= htmlspecialchars($sectionHref, ENT_QUOTES, 'UTF-8') ?>">
-                        <span><?= $escape($sectionLabel) ?></span>
+                <?php if (is_array($currentSuperadmin ?? null)): ?>
+                    <a class="bb-side-link" href="<?= htmlspecialchars($url('/admin/dashboard'), ENT_QUOTES, 'UTF-8') ?>">
+                        <span><?= $escape('tournament_hub.back_to_tournaments') ?></span>
                     </a>
-                <?php endforeach; ?>
+                <?php endif; ?>
             <?php elseif (is_array($currentSuperadmin ?? null)): ?>
-                <a class="bb-side-link active" href="<?= htmlspecialchars($url('/admin/dashboard'), ENT_QUOTES, 'UTF-8') ?>">
+                <a class="bb-side-link active" href="<?= htmlspecialchars($url('/admin/dashboard'), ENT_QUOTES, 'UTF-8') ?>" aria-current="page">
                     <span><?= $escape('nav.dashboard') ?></span>
                     <span class="bb-side-link-muted"><?= $escape('dashboard.tournaments') ?></span>
                 </a>
@@ -134,6 +138,7 @@ $escape = is_callable($e ?? null)
             <?php endif; ?>
         </nav>
     </aside>
+    <?php endif; ?>
 
     <div class="bb-main-area">
         <header class="bb-topbar">
@@ -144,7 +149,7 @@ $escape = is_callable($e ?? null)
                 </a>
                 <a class="bb-topbar-app" href="<?= htmlspecialchars($brandHref, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></a>
                 <div id="js-header-clock" class="bb-clock small pe-none" aria-label="<?= $escape('layout.current_time') ?>">--:--</div>
-                <div class="bb-topbar-actions d-flex align-items-center gap-2 ms-auto">
+                <div class="bb-topbar-actions d-flex align-items-center gap-2 ms-auto" aria-label="<?= $escape('layout.account_actions') ?>">
                     <?php if ($sidebarTournamentName !== ''): ?>
                         <span class="bb-topbar-tournament"><?= htmlspecialchars($sidebarTournamentName, ENT_QUOTES, 'UTF-8') ?></span>
                     <?php endif; ?>
@@ -202,9 +207,9 @@ $escape = is_callable($e ?? null)
             </div>
         </header>
 
-        <main class="bb-content pb-4">
+        <main class="bb-content pb-4" id="main-content" tabindex="-1">
             <?php if ($flashMessage !== ''): ?>
-                <div class="alert bb-flash <?= htmlspecialchars($alertClass, ENT_QUOTES, 'UTF-8') ?>" role="alert">
+                <div class="alert bb-flash <?= htmlspecialchars($alertClass, ENT_QUOTES, 'UTF-8') ?>" role="<?= $flashRole ?>" aria-live="<?= $flashLive ?>" tabindex="-1">
                     <?= htmlspecialchars($flashMessage, ENT_QUOTES, 'UTF-8') ?>
                 </div>
             <?php endif; ?>
@@ -221,7 +226,7 @@ $escape = is_callable($e ?? null)
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
 <script>
     (function () {
         if (typeof bootstrap === 'undefined' || typeof bootstrap.Tooltip === 'undefined') {
@@ -249,7 +254,7 @@ $escape = is_callable($e ?? null)
         }
 
         renderClock();
-        setInterval(renderClock, 1000);
+        setInterval(renderClock, 30000);
     })();
 
     (function () {
@@ -281,6 +286,13 @@ $escape = is_callable($e ?? null)
         button.addEventListener('click', function () {
             applyTheme(currentTheme() === 'light' ? 'dark' : 'light');
         });
+    })();
+
+    (function () {
+        var errorAlert = document.querySelector('.bb-flash[role="alert"]');
+        if (errorAlert && !document.getElementById('create-tournament-validation')) {
+            errorAlert.focus();
+        }
     })();
 </script>
 </body>

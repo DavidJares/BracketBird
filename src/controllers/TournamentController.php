@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Models\MatchModel;
 use App\Models\TeamModel;
 use App\Models\TournamentModel;
+use App\Support\GroupStageScheduler;
 use App\Support\Language;
 use App\Support\Translator;
 use DateInterval;
@@ -16,6 +17,17 @@ use Throwable;
 final class TournamentController extends BaseController
 {
     private const MATCH_MODES = ['fixed_2_sets', 'best_of_3'];
+    private const MAX_TOURNAMENT_NAME_LENGTH = 150;
+    private const MAX_LOCATION_LENGTH = 150;
+    private const MAX_TEAM_NAME_LENGTH = 150;
+    private const MAX_TEAM_DESCRIPTION_BYTES = 1000;
+    private const MAX_PUBLIC_TITLE_LENGTH = 200;
+    private const MAX_PUBLIC_DESCRIPTION_BYTES = 65535;
+    private const MAX_URL_LENGTH = 500;
+    private const MAX_ADMIN_PASSWORD_BYTES = 72;
+    private const MAX_LOGO_DIMENSION = 4096;
+    private const MAX_LOGO_PIXELS = 16_000_000;
+    private const MAX_GROUPS = 32;
     private const ADMIN_SECTIONS = ['tournament', 'groups', 'matches', 'knockout', 'public_view', 'teams', 'exports'];
     private const PUBLIC_SCREEN_DEFINITIONS = [
         'overview' => ['label' => 'Overview', 'path' => '/overview'],
@@ -917,7 +929,7 @@ final class TournamentController extends BaseController
      */
     private function renderPrintView(string $view, array $data): void
     {
-        $printViewFile = __DIR__ . '/../Views/' . $view . '.php';
+        $printViewFile = __DIR__ . '/../views/' . $view . '.php';
         if (!is_file($printViewFile)) {
             throw new \RuntimeException(sprintf('View "%s" not found.', $view));
         }
@@ -929,17 +941,12 @@ final class TournamentController extends BaseController
         $e = fn (string $key, array $params = []): string => htmlspecialchars($translator->translate($key, $params), ENT_QUOTES, 'UTF-8');
         $url = fn (string $path = '/'): string => $this->url($path);
         extract($data, EXTR_SKIP);
-        require __DIR__ . '/../Views/admin/print/layout.php';
+        require __DIR__ . '/../views/admin/print/layout.php';
     }
 
     private function absoluteUrl(string $path): string
     {
-        $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
-            || ((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
-            ? 'https'
-            : 'http';
-        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-        return $scheme . '://' . $host . $this->url($path);
+        return $this->canonicalOrigin() . $this->url($path);
     }
 
     private function appTimezone(): \DateTimeZone
@@ -988,6 +995,18 @@ final class TournamentController extends BaseController
         );
         $hasGroupMatches = count($groupMatches) > 0;
         $hasKnockoutMatches = count($knockoutMatches) > 0;
+        $groupMatchesInProgressCount = count(array_filter(
+            $groupMatches,
+            static fn (array $match): bool => (string) ($match['status'] ?? '') === 'in_progress'
+        ));
+        $knockoutMatchesFinishedCount = count(array_filter(
+            $knockoutMatches,
+            static fn (array $match): bool => (string) ($match['status'] ?? '') === 'finished'
+        ));
+        $knockoutMatchesInProgressCount = count(array_filter(
+            $knockoutMatches,
+            static fn (array $match): bool => (string) ($match['status'] ?? '') === 'in_progress'
+        ));
 
         $isSlugContext = $context === 'tournament_admin';
         $section = $this->normalizeSection($section);
@@ -1102,7 +1121,7 @@ final class TournamentController extends BaseController
         unset($knockoutMatch);
 
         $this->render('admin/tournament_detail', [
-            'title' => 'Tournament detail',
+            'title' => (string) ($tournament['name'] ?? 'Tournament'),
             'tournament' => $tournament,
             'groups' => $groups,
             'teams' => $teams,
@@ -1110,8 +1129,13 @@ final class TournamentController extends BaseController
             'groupStandingsByGroup' => $groupStandingsByGroup,
             'groupMatches' => $filteredGroupMatches,
             'groupMatchesTotalCount' => count($groupMatches),
+            'groupMatchesFinishedCount' => count($finishedGroupMatches),
+            'groupMatchesInProgressCount' => $groupMatchesInProgressCount,
             'hasGroupMatches' => $hasGroupMatches,
+            'hasAnyMatches' => $hasGroupMatches || $hasKnockoutMatches,
             'knockoutMatches' => $knockoutMatches,
+            'knockoutMatchesFinishedCount' => $knockoutMatchesFinishedCount,
+            'knockoutMatchesInProgressCount' => $knockoutMatchesInProgressCount,
             'hasKnockoutMatches' => $hasKnockoutMatches,
             'matchModes' => self::MATCH_MODES,
             'activeSection' => $section,
@@ -1177,6 +1201,7 @@ final class TournamentController extends BaseController
         }
 
         $matchSets = $matchModel->setsForMatch($matchId);
+        $requiresKnockoutResetConfirmation = $matchModel->knockoutMatchCountForTournament($tournamentId) > 0;
         $backToMatchesPath = $isSlugContext
             ? $this->tournamentAdminSectionRedirectPath($tournamentSlug, 'matches')
             : $this->superadminSectionRedirectPath($tournamentId, 'matches');
@@ -1205,6 +1230,7 @@ final class TournamentController extends BaseController
             'isSlugContext' => $isSlugContext,
             'matchStage' => 'group',
             'requiresDependentResetConfirmation' => false,
+            'requiresKnockoutResetConfirmation' => $requiresKnockoutResetConfirmation,
         ]);
     }
 
@@ -1241,7 +1267,7 @@ final class TournamentController extends BaseController
             $winnerTeamId = (int) ($knockoutMatch['winner_team_id'] ?? 0);
             $setsSummaryA = (int) ($knockoutMatch['sets_summary_a'] ?? 0);
             $setsSummaryB = (int) ($knockoutMatch['sets_summary_b'] ?? 0);
-            if ($status === 'finished' || $winnerTeamId > 0 || $setsSummaryA > 0 || $setsSummaryB > 0) {
+            if (in_array($status, ['in_progress', 'finished'], true) || $winnerTeamId > 0 || $setsSummaryA > 0 || $setsSummaryB > 0) {
                 $requiresDependentResetConfirmation = true;
                 break;
             }
@@ -1268,6 +1294,7 @@ final class TournamentController extends BaseController
             'isSlugContext' => $isSlugContext,
             'matchStage' => 'knockout',
             'requiresDependentResetConfirmation' => $requiresDependentResetConfirmation,
+            'requiresKnockoutResetConfirmation' => false,
         ]);
     }
 
@@ -1289,7 +1316,19 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
 
-        if (!$matchModel->markGroupMatchInProgress($tournamentId, $matchId)) {
+        $expectedLockVersion = $this->requestPostStrictInt('lock_version', 0, PHP_INT_MAX);
+        if ($expectedLockVersion === null) {
+            $this->setFlash('error', 'Invalid or stale match version.');
+            $this->redirect($redirectPath);
+        }
+
+        try {
+            $started = $matchModel->markGroupMatchInProgress($tournamentId, $matchId, $expectedLockVersion);
+        } catch (Throwable) {
+            $this->setFlash('error', 'Match could not be started.');
+            $this->redirect($redirectPath);
+        }
+        if (!$started) {
             $this->setFlash('error', 'Match could not be started.');
             $this->redirect($redirectPath);
         }
@@ -1323,25 +1362,58 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
 
-        $validated = $this->validateScoreInput($matchMode, (int) ($match['team_a_id'] ?? 0), (int) ($match['team_b_id'] ?? 0));
+        $validated = $this->validateScoreInput(
+            $matchMode,
+            (int) ($match['team_a_id'] ?? 0),
+            (int) ($match['team_b_id'] ?? 0),
+            false
+        );
         if ($validated === null) {
             $this->redirect($redirectPath);
         }
 
-        $saved = $matchModel->saveGroupMatchResult(
-            $tournamentId,
-            $matchId,
-            $validated['sets'],
-            $validated['sets_summary_a'],
-            $validated['sets_summary_b'],
-            $validated['winner_team_id']
-        );
-        if (!$saved) {
+        $expectedLockVersion = $this->requestPostStrictInt('lock_version', 0, PHP_INT_MAX);
+        if ($expectedLockVersion === null) {
+            $this->setFlash('error', 'Invalid or stale match version.');
+            $this->redirect($redirectPath);
+        }
+
+        try {
+            $writeResult = $matchModel->saveGroupMatchResult(
+                $tournamentId,
+                $matchId,
+                $expectedLockVersion,
+                (int) ($match['team_a_id'] ?? 0),
+                (int) ($match['team_b_id'] ?? 0),
+                $validated['sets'],
+                $validated['sets_summary_a'],
+                $validated['sets_summary_b'],
+                $validated['winner_team_id'],
+                $this->requestPostString('confirm_reset_knockout') === '1'
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Match result could not be saved.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_REQUIRES_KNOCKOUT_RESET) {
+            $this->setFlash('error', 'Changing a group result requires confirmation because the knockout bracket will be removed.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_STALE) {
+            $this->setFlash('error', 'This match changed in another session. Reload it before saving.');
+            $this->redirect($redirectPath);
+        }
+        if (!in_array($writeResult, [MatchModel::WRITE_SAVED, MatchModel::WRITE_IDEMPOTENT], true)) {
             $this->setFlash('error', 'Match result could not be saved. Check match status and try again.');
             $this->redirect($redirectPath);
         }
 
-        $this->setFlash('success', 'Match result saved. Match marked as finished.');
+        $this->setFlash(
+            'success',
+            $writeResult === MatchModel::WRITE_IDEMPOTENT
+                ? 'Match result was already up to date.'
+                : 'Match result saved. Match marked as finished.'
+        );
         $this->redirect($successRedirectPath);
     }
 
@@ -1369,7 +1441,12 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
 
-        $validated = $this->validateScoreInput($matchMode, (int) ($match['team_a_id'] ?? 0), (int) ($match['team_b_id'] ?? 0));
+        $validated = $this->validateScoreInput(
+            $matchMode,
+            (int) ($match['team_a_id'] ?? 0),
+            (int) ($match['team_b_id'] ?? 0),
+            true
+        );
         if ($validated === null) {
             $this->redirect($redirectPath);
         }
@@ -1384,7 +1461,12 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
 
-        $descendantIds = $this->descendantMatchIdsForSource($matchId, $sourceByMatchId, $childrenBySource);
+        $currentWinnerTeamId = (int) ($match['winner_team_id'] ?? 0);
+        $winnerChanged = $currentWinnerTeamId > 0
+            && $currentWinnerTeamId !== (int) $validated['winner_team_id'];
+        $descendantIds = $winnerChanged
+            ? $this->descendantMatchIdsForSource($matchId, $sourceByMatchId, $childrenBySource)
+            : [];
         $hasScoredDownstream = false;
         foreach ($knockoutMatches as $knockoutMatch) {
             $descendantId = (int) ($knockoutMatch['id'] ?? 0);
@@ -1396,7 +1478,12 @@ final class TournamentController extends BaseController
             $descendantWinner = (int) ($knockoutMatch['winner_team_id'] ?? 0);
             $descendantSetsA = (int) ($knockoutMatch['sets_summary_a'] ?? 0);
             $descendantSetsB = (int) ($knockoutMatch['sets_summary_b'] ?? 0);
-            if ($descendantStatus === 'finished' || $descendantWinner > 0 || $descendantSetsA > 0 || $descendantSetsB > 0) {
+            if (
+                in_array($descendantStatus, ['in_progress', 'finished'], true)
+                || $descendantWinner > 0
+                || $descendantSetsA > 0
+                || $descendantSetsB > 0
+            ) {
                 $hasScoredDownstream = true;
                 break;
             }
@@ -1420,23 +1507,51 @@ final class TournamentController extends BaseController
         }
         $resetSourceCodes = array_values(array_unique($resetSourceCodes));
 
-        $saved = $matchModel->applyKnockoutResultAndProgress(
-            $tournamentId,
-            $matchId,
-            $validated['sets'],
-            $validated['sets_summary_a'],
-            $validated['sets_summary_b'],
-            $validated['winner_team_id'],
-            $resetMatchIds,
-            $resetSourceCodes,
-            $winnerSourceCode
-        );
-        if (!$saved) {
+        $expectedLockVersion = $this->requestPostStrictInt('lock_version', 0, PHP_INT_MAX);
+        if ($expectedLockVersion === null) {
+            $this->setFlash('error', 'Invalid or stale match version.');
+            $this->redirect($redirectPath);
+        }
+
+        try {
+            $writeResult = $matchModel->applyKnockoutResultAndProgress(
+                $tournamentId,
+                $matchId,
+                $expectedLockVersion,
+                (int) ($match['team_a_id'] ?? 0),
+                (int) ($match['team_b_id'] ?? 0),
+                $validated['sets'],
+                $validated['sets_summary_a'],
+                $validated['sets_summary_b'],
+                (int) $validated['winner_team_id'],
+                $resetMatchIds,
+                $resetSourceCodes,
+                $winnerSourceCode,
+                $confirmResetDependents
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Knockout result could not be saved.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_REQUIRES_DEPENDENT_RESET) {
+            $this->setFlash('error', 'Changing the winner requires confirmation because dependent knockout results will be reset.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_STALE) {
+            $this->setFlash('error', 'This match changed in another session. Reload it before saving.');
+            $this->redirect($redirectPath);
+        }
+        if (!in_array($writeResult, [MatchModel::WRITE_SAVED, MatchModel::WRITE_IDEMPOTENT], true)) {
             $this->setFlash('error', 'Knockout result could not be saved.');
             $this->redirect($redirectPath);
         }
 
-        $this->setFlash('success', 'Knockout result saved. Progression updated.');
+        $this->setFlash(
+            'success',
+            $writeResult === MatchModel::WRITE_IDEMPOTENT
+                ? 'Knockout result was already up to date.'
+                : 'Knockout result saved. Progression updated.'
+        );
         $this->redirect($successRedirectPath);
     }
 
@@ -1453,17 +1568,47 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
 
-        if ((string) ($match['status'] ?? '') !== 'finished') {
+        if (!in_array((string) ($match['status'] ?? ''), ['finished', 'scheduled'], true)) {
             $this->setFlash('error', 'Only finished matches can be reset.');
             $this->redirect($redirectPath);
         }
 
-        if (!$matchModel->resetGroupMatchResult($tournamentId, $matchId)) {
+        $expectedLockVersion = $this->requestPostStrictInt('lock_version', 0, PHP_INT_MAX);
+        if ($expectedLockVersion === null) {
+            $this->setFlash('error', 'Invalid or stale match version.');
+            $this->redirect($redirectPath);
+        }
+
+        try {
+            $writeResult = $matchModel->resetGroupMatchResult(
+                $tournamentId,
+                $matchId,
+                $expectedLockVersion,
+                $this->requestPostString('confirm_reset_knockout') === '1'
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Match result could not be reset.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_REQUIRES_KNOCKOUT_RESET) {
+            $this->setFlash('error', 'Resetting a group result requires confirmation because the knockout bracket will be removed.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_STALE) {
+            $this->setFlash('error', 'This match changed in another session. Reload it before resetting.');
+            $this->redirect($redirectPath);
+        }
+        if (!in_array($writeResult, [MatchModel::WRITE_SAVED, MatchModel::WRITE_IDEMPOTENT], true)) {
             $this->setFlash('error', 'Match result could not be reset.');
             $this->redirect($redirectPath);
         }
 
-        $this->setFlash('success', 'Match result reset. Status changed to scheduled.');
+        $this->setFlash(
+            'success',
+            $writeResult === MatchModel::WRITE_IDEMPOTENT
+                ? 'Match result was already reset.'
+                : 'Match result reset. Status changed to scheduled.'
+        );
         $this->redirect($redirectPath);
     }
 
@@ -1477,6 +1622,12 @@ final class TournamentController extends BaseController
         string $redirectSection = 'tournament'
     ): void
     {
+        $expectedStateVersion = $this->requestPostStrictInt('state_version', 0, PHP_INT_MAX);
+        if ($expectedStateVersion === null) {
+            $this->setFlash('error', 'Tournament settings are out of date. Reload the page and try again.');
+            $this->redirect($redirectPath);
+        }
+
         $data = $this->collectTournamentInput();
         if ($data === null) {
             $this->redirect($redirectPath);
@@ -1490,21 +1641,62 @@ final class TournamentController extends BaseController
             $effectiveSlug = $tournamentModel->generateUniqueSlug((string) $data['name'], (int) ($tournament['id'] ?? 0));
         }
         $data['slug'] = $effectiveSlug;
+        $currentStartTime = $this->normalizeTimeHHMMOrEmpty((string) ($tournament['start_time'] ?? ''));
+        $structuralChange = (string) ($tournament['event_date'] ?? '') !== (string) $data['event_date']
+            || (string) ($currentStartTime ?? '') !== (string) $data['start_time']
+            || (int) ($tournament['number_of_groups'] ?? 0) !== (int) $data['number_of_groups']
+            || (int) ($tournament['number_of_courts'] ?? 0) !== (int) $data['number_of_courts']
+            || (int) ($tournament['match_duration_minutes'] ?? 0) !== (int) $data['match_duration_minutes']
+            || (int) ($tournament['advancing_teams_count'] ?? 0) !== (int) $data['advancing_teams_count']
+            || (string) ($tournament['group_stage_mode'] ?? ($tournament['match_mode'] ?? '')) !== (string) $data['group_stage_mode']
+            || (string) ($tournament['knockout_mode'] ?? '') !== (string) $data['knockout_mode'];
+        $confirmResetMatches = $this->requestPostString('confirm_reset_matches') === '1';
 
         try {
-            $tournamentModel->update((int) $tournament['id'], $data);
-        } catch (Throwable $throwable) {
+            $updateResult = $tournamentModel->update(
+                (int) $tournament['id'],
+                $data,
+                $expectedStateVersion,
+                $structuralChange,
+                $confirmResetMatches
+            );
+        } catch (Throwable) {
             $this->setFlash('error', 'Tournament could not be updated.');
             $this->redirect($redirectPath);
-            return;
+        }
+        if ($updateResult === TournamentModel::UPDATE_REQUIRES_MATCH_RESET) {
+            $this->setFlash('error', 'Structural tournament changes require confirmation because existing matches will be removed.');
+            $this->redirect($redirectPath);
+        }
+        if ($updateResult === TournamentModel::UPDATE_STALE) {
+            $this->setFlash('error', 'Tournament settings changed in another session. Reload the page before saving.');
+            $this->redirect($redirectPath);
+        }
+        if ($updateResult !== TournamentModel::UPDATE_UPDATED) {
+            $this->setFlash('error', 'Tournament could not be updated.');
+            $this->redirect($redirectPath);
+        }
+
+        if ((string) ($data['admin_password'] ?? '') !== '') {
+            $this->logSecurityEvent('tournament_admin_password_changed', [
+                'tournament_id' => (int) $tournament['id'],
+            ]);
         }
 
         $currentTournamentAdmin = $this->currentTournamentAdmin();
         if (is_array($currentTournamentAdmin) && (int) $currentTournamentAdmin['id'] === (int) $tournament['id']) {
+            if ((string) ($data['admin_password'] ?? '') !== '') {
+                $this->endAuthentication();
+                $this->setFlash('success', 'Tournament password changed. Sign in again with the new password.');
+                $this->redirect('/tournament/' . $effectiveSlug . '/login');
+            }
+
+            $sessionFingerprint = $_SESSION['tournament_admin']['credential_fingerprint'] ?? '';
             $_SESSION['tournament_admin'] = [
                 'id' => (int) $tournament['id'],
                 'slug' => $effectiveSlug,
                 'name' => (string) $data['name'],
+                'credential_fingerprint' => is_string($sessionFingerprint) ? $sessionFingerprint : '',
             ];
         }
 
@@ -1529,9 +1721,28 @@ final class TournamentController extends BaseController
             $this->setFlash('error', 'Team name is required.');
             $this->redirect($redirectPath);
         }
+        if ($this->stringLength($teamName) > self::MAX_TEAM_NAME_LENGTH) {
+            $this->setFlash('error', 'Team name must be at most 150 characters.');
+            $this->redirect($redirectPath);
+        }
+        if (strlen($description) > self::MAX_TEAM_DESCRIPTION_BYTES) {
+            $this->setFlash('error', 'Team description must be at most 1000 bytes.');
+            $this->redirect($redirectPath);
+        }
 
         $teamModel = new TeamModel($this->db());
-        $teamModel->create((int) $tournament['id'], $teamName, $description);
+        try {
+            $teamModel->create((int) $tournament['id'], $teamName, $description);
+        } catch (\DomainException $exception) {
+            $message = $exception->getMessage() === 'TEAM_LIMIT_REACHED'
+                ? 'A tournament can have at most 64 teams.'
+                : 'Team could not be added.';
+            $this->setFlash('error', $message);
+            $this->redirect($redirectPath);
+        } catch (Throwable) {
+            $this->setFlash('error', 'Team could not be added.');
+            $this->redirect($redirectPath);
+        }
 
         $this->setFlash('success', 'Team added.');
         $this->redirect($redirectPath);
@@ -1542,17 +1753,45 @@ final class TournamentController extends BaseController
      */
     private function handleUpdateTeam(array $tournament, string $redirectPath): void
     {
-        $teamId = (int) $this->requestPostString('team_id');
+        $teamId = $this->requestPostStrictInt('team_id', 1, PHP_INT_MAX) ?? 0;
+        $expectedStateVersion = $this->requestPostStrictInt('state_version', 0, PHP_INT_MAX);
         $teamName = $this->requestPostString('team_name');
         $description = $this->requestPostString('description');
 
-        if ($teamId <= 0 || $teamName === '') {
+        if ($teamId <= 0 || $expectedStateVersion === null || $teamName === '') {
             $this->setFlash('error', 'Team name is required.');
+            $this->redirect($redirectPath);
+        }
+        if ($this->stringLength($teamName) > self::MAX_TEAM_NAME_LENGTH) {
+            $this->setFlash('error', 'Team name must be at most 150 characters.');
+            $this->redirect($redirectPath);
+        }
+        if (strlen($description) > self::MAX_TEAM_DESCRIPTION_BYTES) {
+            $this->setFlash('error', 'Team description must be at most 1000 bytes.');
             $this->redirect($redirectPath);
         }
 
         $teamModel = new TeamModel($this->db());
-        $teamModel->update($teamId, (int) $tournament['id'], $teamName, $description);
+        try {
+            $writeResult = $teamModel->update(
+                $teamId,
+                (int) $tournament['id'],
+                $expectedStateVersion,
+                $teamName,
+                $description
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Team could not be updated.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_STALE) {
+            $this->setFlash('error', 'Tournament data changed in another session. Reload the page before updating this team.');
+            $this->redirect($redirectPath);
+        }
+        if (!in_array($writeResult, [TeamModel::WRITE_UPDATED, TeamModel::WRITE_IDEMPOTENT], true)) {
+            $this->setFlash('error', 'Team could not be updated.');
+            $this->redirect($redirectPath);
+        }
 
         $this->setFlash('success', 'Team updated.');
         $this->redirect($redirectPath);
@@ -1563,10 +1802,11 @@ final class TournamentController extends BaseController
      */
     private function handleDeleteTeam(array $tournament, string $redirectPath): void
     {
-        $teamId = (int) $this->requestPostString('team_id');
+        $teamId = $this->requestPostStrictInt('team_id', 1, PHP_INT_MAX) ?? 0;
+        $expectedStateVersion = $this->requestPostStrictInt('state_version', 0, PHP_INT_MAX);
         $confirmation = $this->requestPostString('confirm_delete');
 
-        if ($teamId <= 0) {
+        if ($teamId <= 0 || $expectedStateVersion === null) {
             $this->setFlash('error', 'Invalid team selected.');
             $this->redirect($redirectPath);
         }
@@ -1577,7 +1817,29 @@ final class TournamentController extends BaseController
         }
 
         $teamModel = new TeamModel($this->db());
-        $teamModel->delete($teamId, (int) $tournament['id']);
+        try {
+            $writeResult = $teamModel->delete(
+                $teamId,
+                (int) $tournament['id'],
+                $expectedStateVersion,
+                $this->requestPostString('confirm_reset_matches') === '1'
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Team could not be deleted.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_REQUIRES_MATCH_RESET) {
+            $this->setFlash('error', 'Deleting this team requires confirmation because all generated matches will be removed.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_STALE) {
+            $this->setFlash('error', 'Tournament data changed in another session. Reload the page before deleting this team.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult !== TeamModel::WRITE_UPDATED) {
+            $this->setFlash('error', 'Team was not found or could not be deleted.');
+            $this->redirect($redirectPath);
+        }
 
         $this->setFlash('success', 'Team deleted.');
         $this->redirect($redirectPath);
@@ -1588,11 +1850,14 @@ final class TournamentController extends BaseController
      */
     private function handleAssignTeamGroup(array $tournament, string $redirectPath): void
     {
-        $teamId = (int) $this->requestPostString('team_id');
+        $teamId = $this->requestPostStrictInt('team_id', 1, PHP_INT_MAX) ?? 0;
+        $expectedStateVersion = $this->requestPostStrictInt('state_version', 0, PHP_INT_MAX);
         $groupIdRaw = $this->requestPostString('group_id');
-        $groupId = $groupIdRaw === '' ? null : (int) $groupIdRaw;
+        $groupId = $groupIdRaw === ''
+            ? null
+            : $this->requestPostStrictInt('group_id', 1, PHP_INT_MAX);
 
-        if ($teamId <= 0) {
+        if ($teamId <= 0 || $expectedStateVersion === null) {
             $this->setFlash('error', 'Invalid team selected.');
             $this->redirect($redirectPath);
         }
@@ -1601,13 +1866,40 @@ final class TournamentController extends BaseController
         $groups = $tournamentModel->groupsForTournament((int) $tournament['id']);
         $validGroupIds = $this->groupIdSet($groups);
 
+        if ($groupIdRaw !== '' && $groupId === null) {
+            $this->setFlash('error', 'Invalid group selected.');
+            $this->redirect($redirectPath);
+        }
         if ($groupId !== null && !isset($validGroupIds[$groupId])) {
             $this->setFlash('error', 'Invalid group selected.');
             $this->redirect($redirectPath);
         }
 
         $teamModel = new TeamModel($this->db());
-        $teamModel->updateGroupAssignment($teamId, (int) $tournament['id'], $groupId);
+        try {
+            $writeResult = $teamModel->updateGroupAssignment(
+                $teamId,
+                (int) $tournament['id'],
+                $groupId,
+                $expectedStateVersion,
+                $this->requestPostString('confirm_reset_matches') === '1'
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Team assignment could not be updated.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_REQUIRES_MATCH_RESET) {
+            $this->setFlash('error', 'Changing a group assignment requires confirmation because all generated matches will be removed.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_STALE) {
+            $this->setFlash('error', 'Tournament data changed in another session. Reload the page before changing assignments.');
+            $this->redirect($redirectPath);
+        }
+        if (!in_array($writeResult, [TeamModel::WRITE_UPDATED, TeamModel::WRITE_IDEMPOTENT], true)) {
+            $this->setFlash('error', 'Team assignment could not be updated.');
+            $this->redirect($redirectPath);
+        }
 
         $this->setFlash('success', 'Team assignment updated.');
         $this->redirect($redirectPath);
@@ -1619,7 +1911,12 @@ final class TournamentController extends BaseController
     private function handleAutoAssignTeams(array $tournament, string $redirectPath): void
     {
         $overwriteConfirmed = $this->requestPostString('confirm_overwrite') === '1';
+        $expectedStateVersion = $this->requestPostStrictInt('state_version', 0, PHP_INT_MAX);
         $tournamentId = (int) $tournament['id'];
+        if ($expectedStateVersion === null) {
+            $this->setFlash('error', 'Tournament data is out of date. Reload the page before assigning teams.');
+            $this->redirect($redirectPath);
+        }
 
         $tournamentModel = new TournamentModel($this->db());
         $groups = $tournamentModel->groupsForTournament($tournamentId);
@@ -1671,7 +1968,29 @@ final class TournamentController extends BaseController
             }
         }
 
-        $teamModel->bulkUpdateGroupAssignments($tournamentId, $assignments);
+        try {
+            $writeResult = $teamModel->bulkUpdateGroupAssignments(
+                $tournamentId,
+                $assignments,
+                $expectedStateVersion,
+                $this->requestPostString('confirm_reset_matches') === '1'
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Teams could not be assigned.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_REQUIRES_MATCH_RESET) {
+            $this->setFlash('error', 'Automatic assignment requires confirmation because all generated matches will be removed.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === TeamModel::WRITE_STALE) {
+            $this->setFlash('error', 'Tournament teams changed during automatic assignment. Review the latest groups and try again.');
+            $this->redirect($redirectPath);
+        }
+        if (!in_array($writeResult, [TeamModel::WRITE_UPDATED, TeamModel::WRITE_IDEMPOTENT], true)) {
+            $this->setFlash('error', 'Teams could not be assigned.');
+            $this->redirect($redirectPath);
+        }
 
         $this->setFlash('success', 'Teams were automatically assigned to groups.');
         $this->redirect($redirectPath);
@@ -1721,6 +2040,7 @@ final class TournamentController extends BaseController
 
         $matchModel = new MatchModel($this->db());
         $hasGroupMatches = $matchModel->groupMatchCountForTournament($tournamentId) > 0;
+        $hasKnockoutMatches = $matchModel->knockoutMatchCountForTournament($tournamentId) > 0;
 
         $confirmUnassigned = $this->requestPostString('confirm_unassigned') === '1';
         if ((int) $groupAssignment['unassigned_count'] > 0 && !$confirmUnassigned) {
@@ -1729,8 +2049,8 @@ final class TournamentController extends BaseController
         }
 
         $confirmRegenerate = $this->requestPostString('confirm_regenerate') === '1';
-        if ($hasGroupMatches && !$confirmRegenerate) {
-            $this->setFlash('error', 'Group-stage matches already exist. Confirm regeneration to replace them.');
+        if (($hasGroupMatches || $hasKnockoutMatches) && !$confirmRegenerate) {
+            $this->setFlash('error', 'Confirm regeneration to replace group matches and remove any knockout bracket.');
             $this->redirect($redirectPath);
         }
 
@@ -1771,29 +2091,30 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
 
-        $pairings = [];
-        foreach ($teamsByGroupId as $groupId => $groupTeams) {
-            usort(
-                $groupTeams,
-                static function (array $a, array $b): int {
-                    return strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
-                }
+        try {
+            $scheduledMatches = (new GroupStageScheduler())->schedule(
+                $teamsByGroupId,
+                $courtCount,
+                $matchDurationMinutes,
+                $startDateTime
             );
-
-            $groupPairings = $this->createRoundRobinPairingsForGroup($groupId, $groupTeams);
-            foreach ($groupPairings as $pairing) {
-                $pairings[] = $pairing;
-            }
+            $writeResult = $matchModel->replaceGroupMatches(
+                $tournamentId,
+                (int) ($tournament['state_version'] ?? -1),
+                $scheduledMatches
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Group-stage matches could not be generated.');
+            $this->redirect($redirectPath);
         }
-
-        $scheduledMatches = $this->buildScheduledGroupMatches(
-            $pairings,
-            $courtCount,
-            $matchDurationMinutes,
-            $startDateTime
-        );
-
-        $matchModel->replaceGroupMatches($tournamentId, $scheduledMatches);
+        if ($writeResult === MatchModel::WRITE_STALE) {
+            $this->setFlash('error', 'Tournament data changed during generation. Review the latest settings and try again.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult !== MatchModel::WRITE_SAVED) {
+            $this->setFlash('error', 'Group-stage matches could not be generated.');
+            $this->redirect($redirectPath);
+        }
 
         $this->setFlash('success', sprintf('Generated %d group-stage matches.', count($scheduledMatches)));
         $this->redirect($redirectPath);
@@ -1881,7 +2202,24 @@ final class TournamentController extends BaseController
             (int) ($tournament['match_duration_minutes'] ?? 20)
         );
 
-        $matchModel->replaceKnockoutMatches($tournamentId, $matches);
+        try {
+            $writeResult = $matchModel->replaceKnockoutMatches(
+                $tournamentId,
+                (int) ($tournament['state_version'] ?? -1),
+                $matches
+            );
+        } catch (Throwable) {
+            $this->setFlash('error', 'Knockout matches could not be generated.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult === MatchModel::WRITE_STALE) {
+            $this->setFlash('error', 'Tournament results changed during knockout generation. Review the latest standings and try again.');
+            $this->redirect($redirectPath);
+        }
+        if ($writeResult !== MatchModel::WRITE_SAVED) {
+            $this->setFlash('error', 'Knockout matches could not be generated.');
+            $this->redirect($redirectPath);
+        }
 
         $bracketSize = $this->nextPowerOfTwo($advancingTeamsCount);
         $byeCount = $bracketSize - $advancingTeamsCount;
@@ -1922,7 +2260,7 @@ final class TournamentController extends BaseController
      */
     private function resolveTournamentByPostForSuperadmin(): ?array
     {
-        $tournamentId = (int) $this->requestPostString('tournament_id');
+        $tournamentId = $this->requestPostStrictInt('tournament_id', 1, PHP_INT_MAX) ?? 0;
         if ($tournamentId <= 0) {
             $this->setFlash('error', 'Invalid tournament selected.');
             $this->redirect('/admin/dashboard');
@@ -2066,6 +2404,22 @@ final class TournamentController extends BaseController
 
         $tournamentAdmin = $this->currentTournamentAdmin();
         if (is_array($tournamentAdmin) && (int) $tournamentAdmin['id'] === (int) $tournament['id']) {
+            $authRecord = $tournamentModel->findAuthBySlug($slug);
+            $sessionFingerprint = $_SESSION['tournament_admin']['credential_fingerprint'] ?? '';
+            $expectedFingerprint = is_array($authRecord)
+                ? hash('sha256', (string) ($authRecord['admin_password_hash'] ?? ''))
+                : '';
+            if (
+                !is_string($sessionFingerprint)
+                || $sessionFingerprint === ''
+                || $expectedFingerprint === ''
+                || !hash_equals($expectedFingerprint, $sessionFingerprint)
+            ) {
+                $this->endAuthentication();
+                $this->setFlash('error', 'Tournament credentials changed. Please sign in again.');
+                $this->redirect('/tournament/' . $slug . '/login');
+            }
+
             return $tournament;
         }
 
@@ -2084,11 +2438,11 @@ final class TournamentController extends BaseController
         $startTimeRaw = $this->requestPostString('start_time');
         $startTime = $this->normalizeTimeHHMMOrEmpty($startTimeRaw);
         $location = $this->requestPostString('location');
-        $adminPassword = $this->requestPostString('admin_password');
-        $numberOfGroups = (int) $this->requestPostString('number_of_groups');
-        $numberOfCourts = (int) $this->requestPostString('number_of_courts');
-        $matchDurationMinutes = (int) $this->requestPostString('match_duration_minutes');
-        $advancingTeamsCount = (int) $this->requestPostString('advancing_teams_count');
+        $adminPassword = $this->requestPostRawString('admin_password');
+        $numberOfGroups = $this->requestPostStrictInt('number_of_groups', 1, self::MAX_GROUPS);
+        $numberOfCourts = $this->requestPostStrictInt('number_of_courts', 1, 99);
+        $matchDurationMinutes = $this->requestPostStrictInt('match_duration_minutes', 1, 240);
+        $advancingTeamsCount = $this->requestPostStrictInt('advancing_teams_count', 2, 64);
         $groupStageMode = $this->requestPostString('group_stage_mode');
         $knockoutMode = $this->requestPostString('knockout_mode');
 
@@ -2096,14 +2450,22 @@ final class TournamentController extends BaseController
             $this->setFlash('error', 'Tournament name is required.');
             return null;
         }
-
-        if ($adminPassword !== '' && strlen($adminPassword) < 8) {
-            $this->setFlash('error', 'Tournament admin password must have at least 8 characters.');
+        if ($this->stringLength($name) > self::MAX_TOURNAMENT_NAME_LENGTH) {
+            $this->setFlash('error', 'Tournament name must be at most 150 characters.');
+            return null;
+        }
+        if ($this->stringLength($location) > self::MAX_LOCATION_LENGTH) {
+            $this->setFlash('error', 'Location must be at most 150 characters.');
             return null;
         }
 
-        if ($eventDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate)) {
-            $this->setFlash('error', 'Event date must use YYYY-MM-DD format.');
+        if ($adminPassword !== '' && (strlen($adminPassword) < 8 || strlen($adminPassword) > self::MAX_ADMIN_PASSWORD_BYTES)) {
+            $this->setFlash('error', 'Tournament admin password must be between 8 and 72 bytes.');
+            return null;
+        }
+
+        if ($eventDate !== '' && !$this->isValidCalendarDate($eventDate)) {
+            $this->setFlash('error', 'Event date must be a valid calendar date in YYYY-MM-DD format.');
             return null;
         }
 
@@ -2112,23 +2474,23 @@ final class TournamentController extends BaseController
             return null;
         }
 
-        if ($numberOfGroups < 1 || $numberOfGroups > 52) {
-            $this->setFlash('error', 'Number of groups must be between 1 and 52.');
+        if ($numberOfGroups === null) {
+            $this->setFlash('error', 'Number of groups must be between 1 and 32.');
             return null;
         }
 
-        if ($numberOfCourts < 1 || $numberOfCourts > 99) {
+        if ($numberOfCourts === null) {
             $this->setFlash('error', 'Number of courts must be between 1 and 99.');
             return null;
         }
 
-        if ($matchDurationMinutes < 1 || $matchDurationMinutes > 240) {
+        if ($matchDurationMinutes === null) {
             $this->setFlash('error', 'Match duration must be between 1 and 240 minutes.');
             return null;
         }
 
-        if ($advancingTeamsCount < 1 || $advancingTeamsCount > 64) {
-            $this->setFlash('error', 'Advancing teams count must be between 1 and 64.');
+        if ($advancingTeamsCount === null) {
+            $this->setFlash('error', 'Advancing teams count must be between 2 and 64.');
             return null;
         }
 
@@ -2162,24 +2524,17 @@ final class TournamentController extends BaseController
      */
     private function handleUpdatePublicView(array $tournament, string $redirectPath): void
     {
+        $expectedStateVersion = $this->requestPostStrictInt('state_version', 0, PHP_INT_MAX);
+        if ($expectedStateVersion === null) {
+            $this->setFlash('error', 'Public View settings are out of date. Reload the page and try again.');
+            $this->redirect($redirectPath);
+        }
+
         $formScope = $this->requestPostString('public_view_form');
         if ($formScope !== 'general' && $formScope !== 'screen_list') {
             $formScope = 'general';
         }
 
-        $publicViewEnabled = $this->requestPostString('public_view_enabled') === '1';
-        $autoplayEnabled = $this->requestPostString('autoplay_enabled') === '1';
-        $rotationIntervalSeconds = (int) $this->requestPostString('rotation_interval_seconds');
-        $publicViewTheme = $this->requestPostString('public_view_theme');
-        if (!in_array($publicViewTheme, ['dark', 'light'], true)) {
-            $publicViewTheme = 'dark';
-        }
-        if ($rotationIntervalSeconds < 5 || $rotationIntervalSeconds > 300) {
-            $this->setFlash('error', 'Rotation interval must be between 5 and 300 seconds.');
-            $this->redirect($redirectPath);
-        }
-
-        $screensByKey = null;
         if ($formScope === 'screen_list') {
             $rawEnabled = $_POST['screen_enabled'] ?? [];
             $rawOrder = $_POST['screen_order'] ?? [];
@@ -2191,18 +2546,84 @@ final class TournamentController extends BaseController
                 $isEnabled = isset($enabledMap[$screenKey]) && (string) $enabledMap[$screenKey] === '1';
                 $sortOrder = 1;
                 if (isset($orderMap[$screenKey])) {
-                    $sortOrder = (int) $orderMap[$screenKey];
+                    $rawSortOrder = $orderMap[$screenKey];
+                    if (!is_string($rawSortOrder) && !is_int($rawSortOrder)) {
+                        $this->setFlash('error', 'Screen order must be a whole number between 1 and 99.');
+                        $this->redirect($redirectPath);
+                    }
+                    $rawSortOrder = trim((string) $rawSortOrder);
+                    if (!ctype_digit($rawSortOrder)) {
+                        $this->setFlash('error', 'Screen order must be a whole number between 1 and 99.');
+                        $this->redirect($redirectPath);
+                    }
+                    $normalizedSortOrder = ltrim($rawSortOrder, '0');
+                    $normalizedSortOrder = $normalizedSortOrder !== '' ? $normalizedSortOrder : '0';
+                    if (
+                        strlen($normalizedSortOrder) > 2
+                        || (int) $normalizedSortOrder < 1
+                        || (int) $normalizedSortOrder > 99
+                    ) {
+                        $this->setFlash('error', 'Screen order must be a whole number between 1 and 99.');
+                        $this->redirect($redirectPath);
+                    }
+                    $sortOrder = (int) $normalizedSortOrder;
                 }
                 $screensByKey[$screenKey] = [
                     'is_enabled' => $isEnabled ? 1 : 0,
-                    'sort_order' => max(1, min(99, $sortOrder)),
+                    'sort_order' => $sortOrder,
                 ];
             }
+
+            try {
+                $updateResult = (new TournamentModel($this->db()))->savePublicScreens(
+                    (int) $tournament['id'],
+                    $expectedStateVersion,
+                    $screensByKey
+                );
+            } catch (Throwable) {
+                $this->setFlash('error', 'Public screen settings could not be updated.');
+                $this->redirect($redirectPath);
+            }
+            if ($updateResult === TournamentModel::UPDATE_STALE) {
+                $this->setFlash('error', 'Public View settings changed in another session. Reload the page before saving.');
+                $this->redirect($redirectPath);
+            }
+            if ($updateResult !== TournamentModel::UPDATE_UPDATED) {
+                $this->setFlash('error', 'Public screen settings could not be updated.');
+                $this->redirect($redirectPath);
+            }
+
+            $this->setFlash('success', 'Public screen settings updated.');
+            $this->redirect($redirectPath);
+        }
+
+        $publicViewEnabled = $this->requestPostString('public_view_enabled') === '1';
+        $autoplayEnabled = $this->requestPostString('autoplay_enabled') === '1';
+        $rotationIntervalSeconds = $this->requestPostStrictInt('rotation_interval_seconds', 5, 300);
+        $publicViewTheme = $this->requestPostString('public_view_theme');
+        if (!in_array($publicViewTheme, ['dark', 'light'], true)) {
+            $publicViewTheme = 'dark';
+        }
+        if ($rotationIntervalSeconds === null) {
+            $this->setFlash('error', 'Rotation interval must be between 5 and 300 seconds.');
+            $this->redirect($redirectPath);
         }
 
         $publicTitleOverride = trim($this->requestPostString('public_title_override'));
         $publicDescription = trim($this->requestPostString('public_description'));
         $publicMapUrl = trim($this->requestPostString('public_map_url'));
+        if ($this->stringLength($publicTitleOverride) > self::MAX_PUBLIC_TITLE_LENGTH) {
+            $this->setFlash('error', 'Public title must be at most 200 characters.');
+            $this->redirect($redirectPath);
+        }
+        if (strlen($publicDescription) > self::MAX_PUBLIC_DESCRIPTION_BYTES) {
+            $this->setFlash('error', 'Public description is too long.');
+            $this->redirect($redirectPath);
+        }
+        if ($this->stringLength($publicMapUrl) > self::MAX_URL_LENGTH) {
+            $this->setFlash('error', 'Map URL must be at most 500 characters.');
+            $this->redirect($redirectPath);
+        }
         if ($publicMapUrl !== '' && filter_var($publicMapUrl, FILTER_VALIDATE_URL) === false) {
             $this->setFlash('error', 'Map URL must be a valid absolute URL.');
             $this->redirect($redirectPath);
@@ -2212,47 +2633,88 @@ final class TournamentController extends BaseController
             $this->redirect($redirectPath);
         }
         $publicMapEmbedInput = trim($this->requestPostString('public_map_embed_url'));
+        if ($this->stringLength($publicMapEmbedInput) > 4000) {
+            $this->setFlash('error', 'Map embed input is too long.');
+            $this->redirect($redirectPath);
+        }
         $publicMapEmbedUrl = $this->extractPublicMapEmbedUrl($publicMapEmbedInput);
         if ($publicMapEmbedInput !== '' && $publicMapEmbedUrl === null) {
             $this->setFlash('error', 'Map embed must be a valid Google embed URL or iframe snippet.');
             $this->redirect($redirectPath);
         }
+        if (is_string($publicMapEmbedUrl) && $this->stringLength($publicMapEmbedUrl) > self::MAX_URL_LENGTH) {
+            $this->setFlash('error', 'Map embed URL must be at most 500 characters.');
+            $this->redirect($redirectPath);
+        }
 
-        $existingLogoPath = trim((string) ($tournament['public_logo_path'] ?? ''));
-        $logoPath = $existingLogoPath;
+        $logoPath = '';
+        $uploadedNewLogo = false;
         $logoUpload = $_FILES['public_logo'] ?? null;
         if (
-            $formScope === 'general'
-            && is_array($logoUpload)
+            is_array($logoUpload)
             && (int) ($logoUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE
         ) {
-            $uploadResult = $this->handlePublicLogoUpload($logoUpload, $existingLogoPath);
+            $uploadResult = $this->handlePublicLogoUpload($logoUpload);
             if (!is_array($uploadResult) || (string) ($uploadResult['error'] ?? '') !== '') {
                 $this->setFlash('error', (string) ($uploadResult['error'] ?? 'Logo upload failed.'));
                 $this->redirect($redirectPath);
             }
             $logoPath = (string) ($uploadResult['path'] ?? '');
+            $uploadedNewLogo = $logoPath !== '';
         }
 
         $tournamentModel = new TournamentModel($this->db());
         try {
-            $tournamentModel->savePublicViewSettings(
+            $saveResult = $tournamentModel->savePublicViewSettings(
                 (int) $tournament['id'],
+                $expectedStateVersion,
                 $publicViewEnabled,
                 $autoplayEnabled,
                 $rotationIntervalSeconds,
                 $publicViewTheme,
                 $publicTitleOverride,
                 $publicDescription,
-                $logoPath,
+                $uploadedNewLogo ? $logoPath : null,
                 $publicMapUrl,
-                $publicMapEmbedUrl ?? '',
-                $screensByKey
+                $publicMapEmbedUrl ?? ''
             );
-        } catch (Throwable $throwable) {
+        } catch (Throwable) {
+            if ($uploadedNewLogo) {
+                $this->removeManagedPublicLogo($logoPath);
+            }
             $this->setFlash('error', 'Public View settings could not be updated.');
             $this->redirect($redirectPath);
             return;
+        }
+
+        if (($saveResult['status'] ?? '') === TournamentModel::UPDATE_STALE) {
+            if ($uploadedNewLogo) {
+                $this->removeManagedPublicLogo($logoPath);
+            }
+            $this->setFlash('error', 'Public View settings changed in another session. Reload the page before saving.');
+            $this->redirect($redirectPath);
+        }
+        if (($saveResult['status'] ?? '') !== TournamentModel::UPDATE_UPDATED) {
+            if ($uploadedNewLogo) {
+                $this->removeManagedPublicLogo($logoPath);
+            }
+            $this->setFlash('error', 'Public View settings could not be updated.');
+            $this->redirect($redirectPath);
+        }
+
+        if ($uploadedNewLogo) {
+            $previousLogoPath = (string) ($saveResult['previous_logo_path'] ?? '');
+            if (
+                $previousLogoPath !== ''
+                && $previousLogoPath !== $logoPath
+                && !$this->removeManagedPublicLogo($previousLogoPath)
+            ) {
+                error_log(json_encode([
+                    'operational_event' => 'managed_logo_cleanup_failed',
+                    'occurred_at' => gmdate(\DateTimeInterface::ATOM),
+                    'tournament_id' => (int) $tournament['id'],
+                ], JSON_UNESCAPED_SLASHES) ?: 'Managed tournament logo cleanup failed.');
+            }
         }
 
         $this->setFlash('success', 'Public View settings updated.');
@@ -2290,10 +2752,9 @@ final class TournamentController extends BaseController
 
     /**
      * @param array<string, mixed> $logoUpload
-     * @param string $existingLogoPath
      * @return array{path?: string, error?: string}
      */
-    private function handlePublicLogoUpload(array $logoUpload, string $existingLogoPath): array
+    private function handlePublicLogoUpload(array $logoUpload): array
     {
         $uploadError = (int) ($logoUpload['error'] ?? UPLOAD_ERR_NO_FILE);
         if ($uploadError !== UPLOAD_ERR_OK) {
@@ -2328,9 +2789,24 @@ final class TournamentController extends BaseController
             }
         }
 
+        $fileInfo = @getimagesize($tmpName);
+        $imageWidth = is_array($fileInfo) ? (int) ($fileInfo[0] ?? 0) : 0;
+        $imageHeight = is_array($fileInfo) ? (int) ($fileInfo[1] ?? 0) : 0;
+        if ($imageWidth <= 0 || $imageHeight <= 0) {
+            return ['error' => 'Logo must be a valid image file.'];
+        }
+        if (
+            $imageWidth > self::MAX_LOGO_DIMENSION
+            || $imageHeight > self::MAX_LOGO_DIMENSION
+            || $imageWidth > intdiv(self::MAX_LOGO_PIXELS, $imageHeight)
+        ) {
+            return ['error' => 'Logo dimensions must be at most 4096 x 4096 pixels and 16 megapixels.'];
+        }
+        $imageMimeType = strtolower((string) ($fileInfo['mime'] ?? ''));
         if ($mimeType === '') {
-            $fileInfo = @getimagesize($tmpName);
-            $mimeType = is_array($fileInfo) ? strtolower((string) ($fileInfo['mime'] ?? '')) : '';
+            $mimeType = $imageMimeType;
+        } elseif ($imageMimeType === '' || $mimeType !== $imageMimeType) {
+            return ['error' => 'Logo image type is inconsistent.'];
         }
         $extensionByMime = [
             'image/png' => 'png',
@@ -2363,26 +2839,8 @@ final class TournamentController extends BaseController
         }
 
         $relativePath = 'uploads/tournament_logos/' . $fileName;
-        $this->deletePublicLogoIfManaged($existingLogoPath, $publicRoot);
 
         return ['path' => $relativePath];
-    }
-
-    private function deletePublicLogoIfManaged(string $logoPath, string $publicRoot): void
-    {
-        $logoPath = trim($logoPath);
-        if ($logoPath === '') {
-            return;
-        }
-
-        if (strpos($logoPath, 'uploads/tournament_logos/') !== 0) {
-            return;
-        }
-
-        $fullPath = $publicRoot . '/' . $logoPath;
-        if (is_file($fullPath)) {
-            @unlink($fullPath);
-        }
     }
 
     /**
@@ -2713,7 +3171,7 @@ final class TournamentController extends BaseController
             }
         }
 
-        $mainPairings = $this->pairHighLow($participantsForMainRound);
+        $mainPairings = $this->pairStandardBracket($participantsForMainRound);
         if (count($mainPairings) < 1) {
             return [];
         }
@@ -2814,27 +3272,30 @@ final class TournamentController extends BaseController
         $matchDurationMinutes = max(1, $matchDurationMinutes);
         $firstStart = (new DateTimeImmutable('now'))->add(new DateInterval('PT10M'));
 
-        $playableIndexes = [];
+        $roundIndexes = [];
+        $roundOrder = [];
         foreach ($matches as $index => $match) {
-            $status = (string) ($match['status'] ?? '');
-            if ($status === 'scheduled') {
-                $playableIndexes[] = $index;
+            $roundName = (string) ($match['round_name'] ?? ('round-' . $index));
+            if (!isset($roundIndexes[$roundName])) {
+                $roundIndexes[$roundName] = [];
+                $roundOrder[] = $roundName;
             }
+            $roundIndexes[$roundName][] = $index;
         }
 
-        foreach ($matches as $index => $match) {
-            if (!in_array($index, $playableIndexes, true)) {
-                $matches[$index]['court_number'] = null;
-                $matches[$index]['planned_start'] = null;
+        $waveOffset = 0;
+        foreach ($roundOrder as $roundName) {
+            $indexes = $roundIndexes[$roundName] ?? [];
+            foreach ($indexes as $slot => $matchIndex) {
+                $courtNumber = ($slot % $courtCount) + 1;
+                $wave = $waveOffset + intdiv($slot, $courtCount);
+                $minutes = $wave * $matchDurationMinutes;
+                $plannedStart = $firstStart->add(new DateInterval('PT' . $minutes . 'M'));
+                $matches[$matchIndex]['court_number'] = $courtNumber;
+                $matches[$matchIndex]['planned_start'] = $plannedStart->format('Y-m-d H:i:s');
             }
-        }
 
-        foreach ($playableIndexes as $slot => $matchIndex) {
-            $courtNumber = ($slot % $courtCount) + 1;
-            $wave = intdiv($slot, $courtCount);
-            $plannedStart = $firstStart->add(new DateInterval('PT' . ($wave * $matchDurationMinutes) . 'M'));
-            $matches[$matchIndex]['court_number'] = $courtNumber;
-            $matches[$matchIndex]['planned_start'] = $plannedStart->format('Y-m-d H:i:s');
+            $waveOffset += max(1, (int) ceil(count($indexes) / $courtCount));
         }
 
         return $matches;
@@ -2856,6 +3317,78 @@ final class TournamentController extends BaseController
             ];
             $left++;
             $right--;
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * Orders a power-of-two field so the best two ranks occupy opposite
+     * halves and cannot meet before the final.
+     *
+     * @param list<array<string, mixed>> $participants
+     * @return list<array{a: array<string, mixed>, b: array<string, mixed>}>
+     */
+    private function pairStandardBracket(array $participants): array
+    {
+        $participantCount = count($participants);
+        if (
+            $participantCount < 2
+            || ($participantCount & ($participantCount - 1)) !== 0
+        ) {
+            return [];
+        }
+
+        $participantsByRank = [];
+        foreach ($participants as $participant) {
+            $rank = (int) ($participant['rank'] ?? 0);
+            if (
+                $rank < 1
+                || $rank > $participantCount
+                || isset($participantsByRank[$rank])
+            ) {
+                return [];
+            }
+
+            $participantsByRank[$rank] = $participant;
+        }
+        if (count($participantsByRank) !== $participantCount) {
+            return [];
+        }
+
+        $seedOrder = [1, 2];
+        $currentSize = 2;
+        while ($currentSize < $participantCount) {
+            $nextSize = $currentSize * 2;
+            $mirrorSum = $nextSize + 1;
+            $nextOrder = [];
+            foreach ($seedOrder as $index => $seed) {
+                $mirror = $mirrorSum - $seed;
+                if ($index % 2 === 0) {
+                    $nextOrder[] = $seed;
+                    $nextOrder[] = $mirror;
+                } else {
+                    $nextOrder[] = $mirror;
+                    $nextOrder[] = $seed;
+                }
+            }
+
+            $seedOrder = $nextOrder;
+            $currentSize = $nextSize;
+        }
+
+        $pairs = [];
+        for ($index = 0; $index < count($seedOrder); $index += 2) {
+            $seedA = $seedOrder[$index] ?? 0;
+            $seedB = $seedOrder[$index + 1] ?? 0;
+            if (!isset($participantsByRank[$seedA], $participantsByRank[$seedB])) {
+                return [];
+            }
+
+            $pairs[] = [
+                'a' => $participantsByRank[$seedA],
+                'b' => $participantsByRank[$seedB],
+            ];
         }
 
         return $pairs;
@@ -3045,7 +3578,6 @@ final class TournamentController extends BaseController
                 'points_against' => 0,
                 'point_diff' => 0,
                 'tournament_points' => 0,
-                'random_key' => mt_rand(1, PHP_INT_MAX),
             ];
         }
 
@@ -3123,41 +3655,15 @@ final class TournamentController extends BaseController
             $headToHead = $headToHeadByGroup[$groupId] ?? [];
             usort(
                 $rows,
-                static function (array $a, array $b) use ($headToHead): int {
-                    $pointsCompare = (int) $b['tournament_points'] <=> (int) $a['tournament_points'];
-                    if ($pointsCompare !== 0) {
-                        return $pointsCompare;
-                    }
-
-                    $idA = (int) $a['team_id'];
-                    $idB = (int) $b['team_id'];
-                    $pairKey = $idA < $idB ? ($idA . ':' . $idB) : ($idB . ':' . $idA);
-                    $headToHeadValue = $headToHead[$pairKey] ?? 0;
-                    if ($headToHeadValue !== 0) {
-                        if ($idA < $idB) {
-                            return $headToHeadValue === 1 ? -1 : 1;
-                        }
-
-                        return $headToHeadValue === -1 ? -1 : 1;
-                    }
-
-                    $pointDiffCompare = (int) $b['point_diff'] <=> (int) $a['point_diff'];
-                    if ($pointDiffCompare !== 0) {
-                        return $pointDiffCompare;
-                    }
-
-                    $pointsForCompare = (int) $b['points_for'] <=> (int) $a['points_for'];
-                    if ($pointsForCompare !== 0) {
-                        return $pointsForCompare;
-                    }
-
-                    return (int) $a['random_key'] <=> (int) $b['random_key'];
+                static function (array $a, array $b): int {
+                    return ((int) $b['tournament_points'] <=> (int) $a['tournament_points'])
+                        ?: ((int) $a['team_id'] <=> (int) $b['team_id']);
                 }
             );
+            $rows = $this->resolveStandingsTieClusters($rows, $headToHead);
 
             foreach ($rows as $index => &$row) {
                 $row['position'] = $index + 1;
-                unset($row['random_key']);
             }
             unset($row);
 
@@ -3168,14 +3674,73 @@ final class TournamentController extends BaseController
     }
 
     /**
+     * @param list<array<string, int|string>> $rows
+     * @param array<string, int> $headToHead
+     * @return list<array<string, int|string>>
+     */
+    private function resolveStandingsTieClusters(array $rows, array $headToHead): array
+    {
+        $metricComparator = static function (array $a, array $b): int {
+            return ((int) $b['point_diff'] <=> (int) $a['point_diff'])
+                ?: ((int) $b['points_for'] <=> (int) $a['points_for'])
+                ?: ((int) $a['team_id'] <=> (int) $b['team_id']);
+        };
+
+        $resolved = [];
+        $offset = 0;
+        while ($offset < count($rows)) {
+            $points = (int) ($rows[$offset]['tournament_points'] ?? 0);
+            $cluster = [];
+            while (
+                $offset < count($rows)
+                && (int) ($rows[$offset]['tournament_points'] ?? 0) === $points
+            ) {
+                $cluster[] = $rows[$offset];
+                $offset++;
+            }
+
+            if (count($cluster) === 2) {
+                usort($cluster, static function (array $a, array $b) use ($headToHead, $metricComparator): int {
+                    $idA = (int) ($a['team_id'] ?? 0);
+                    $idB = (int) ($b['team_id'] ?? 0);
+                    $pairKey = $idA < $idB ? ($idA . ':' . $idB) : ($idB . ':' . $idA);
+                    $headToHeadValue = (int) ($headToHead[$pairKey] ?? 0);
+                    if ($headToHeadValue !== 0) {
+                        if ($idA < $idB) {
+                            return $headToHeadValue === 1 ? -1 : 1;
+                        }
+
+                        return $headToHeadValue === -1 ? -1 : 1;
+                    }
+
+                    return $metricComparator($a, $b);
+                });
+            } elseif (count($cluster) > 1) {
+                usort($cluster, $metricComparator);
+            }
+
+            foreach ($cluster as $row) {
+                $resolved[] = $row;
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
      * @return array{
      *     sets: list<array{set_number: int, score_a: int, score_b: int}>,
      *     sets_summary_a: int,
      *     sets_summary_b: int,
-     *     winner_team_id: int
+     *     winner_team_id: int|null
      * }|null
      */
-    private function validateScoreInput(string $matchMode, int $teamAId, int $teamBId): ?array
+    private function validateScoreInput(
+        string $matchMode,
+        int $teamAId,
+        int $teamBId,
+        bool $isKnockout
+    ): ?array
     {
         if ($teamAId <= 0 || $teamBId <= 0) {
             $this->setFlash('error', 'Match teams are missing.');
@@ -3191,6 +3756,10 @@ final class TournamentController extends BaseController
         for ($setNumber = 1; $setNumber <= 3; $setNumber++) {
             $scoreA = $this->readSetScore($setNumber, 'a');
             $scoreB = $this->readSetScore($setNumber, 'b');
+            if ($scoreA === false || $scoreB === false) {
+                $this->setFlash('error', sprintf('Set %d scores must be whole numbers between 0 and 99.', $setNumber));
+                return null;
+            }
             if ($scoreA === null && $scoreB === null) {
                 continue;
             }
@@ -3232,16 +3801,25 @@ final class TournamentController extends BaseController
                 }
             }
 
-            if ($totalPointsA === $totalPointsB) {
-                $this->setFlash('error', 'Fixed 2 sets draw needs a total-points winner. Totals are tied.');
-                return null;
+            $winnerTeamId = null;
+            if ($setWinsA > $setWinsB) {
+                $winnerTeamId = $teamAId;
+            } elseif ($setWinsB > $setWinsA) {
+                $winnerTeamId = $teamBId;
+            } elseif ($isKnockout) {
+                if ($totalPointsA === $totalPointsB) {
+                    $this->setFlash('error', 'Fixed 2 sets knockout needs a total-points winner. Totals are tied.');
+                    return null;
+                }
+
+                $winnerTeamId = $totalPointsA > $totalPointsB ? $teamAId : $teamBId;
             }
 
             return [
                 'sets' => $rawSets,
                 'sets_summary_a' => $setWinsA,
                 'sets_summary_b' => $setWinsB,
-                'winner_team_id' => $totalPointsA > $totalPointsB ? $teamAId : $teamBId,
+                'winner_team_id' => $winnerTeamId,
             ];
         }
 
@@ -3289,17 +3867,18 @@ final class TournamentController extends BaseController
         ];
     }
 
-    private function readSetScore(int $setNumber, string $side): ?int
+    private function readSetScore(int $setNumber, string $side): int|false|null
     {
         $value = $this->requestPostString('set_' . $setNumber . '_' . $side);
         if ($value === '') {
             return null;
         }
         if (!ctype_digit($value)) {
-            return null;
+            return false;
         }
 
-        return (int) $value;
+        $score = (int) $value;
+        return $score >= 0 && $score <= 99 ? $score : false;
     }
 
     /**
@@ -3370,172 +3949,44 @@ final class TournamentController extends BaseController
         return $set;
     }
 
-    /**
-     * @param list<array{id: int, name: string}> $groupTeams
-     * @return list<array{group_id: int, team_a_id: int, team_b_id: int}>
-     */
-    private function createRoundRobinPairingsForGroup(int $groupId, array $groupTeams): array
+    private function requestPostStrictInt(string $key, int $minimum, int $maximum): ?int
     {
-        $pairings = [];
-        $count = count($groupTeams);
-        for ($i = 0; $i < $count; $i++) {
-            $teamAId = (int) ($groupTeams[$i]['id'] ?? 0);
-            if ($teamAId <= 0) {
-                continue;
-            }
-
-            for ($j = $i + 1; $j < $count; $j++) {
-                $teamBId = (int) ($groupTeams[$j]['id'] ?? 0);
-                if ($teamBId <= 0) {
-                    continue;
-                }
-
-                $pairings[] = [
-                    'group_id' => $groupId,
-                    'team_a_id' => $teamAId,
-                    'team_b_id' => $teamBId,
-                ];
-            }
+        $value = $this->requestPostString($key);
+        if ($value === '' || !ctype_digit($value)) {
+            return null;
         }
 
-        return $pairings;
-    }
-
-    /**
-     * @param list<array{group_id: int, team_a_id: int, team_b_id: int}> $pairings
-     * @return list<array{
-     *     group_id: int,
-     *     team_a_id: int,
-     *     team_b_id: int,
-     *     court_number: int,
-     *     schedule_order: int,
-     *     planned_start: string
-     * }>
-     */
-    private function buildScheduledGroupMatches(
-        array $pairings,
-        int $courtCount,
-        int $matchDurationMinutes,
-        DateTimeImmutable $startDateTime
-    ): array {
-        $pending = array_values($pairings);
-        $schedule = [];
-        $lastSlotByTeam = [];
-        $slotIndex = 0;
-        $order = 1;
-
-        while (count($pending) > 0) {
-            $teamsUsedInSlot = [];
-            $assignedInSlot = 0;
-            $plannedStart = $this->plannedStartAtSlot($startDateTime, $slotIndex, $matchDurationMinutes);
-
-            for ($court = 1; $court <= $courtCount; $court++) {
-                if (count($pending) === 0) {
-                    break;
-                }
-
-                $bestIndex = $this->pickBestMatchIndex($pending, $teamsUsedInSlot, $lastSlotByTeam, $slotIndex);
-                if ($bestIndex === null) {
-                    break;
-                }
-
-                $match = $pending[$bestIndex];
-                array_splice($pending, $bestIndex, 1);
-
-                $teamAId = (int) ($match['team_a_id'] ?? 0);
-                $teamBId = (int) ($match['team_b_id'] ?? 0);
-
-                $schedule[] = [
-                    'group_id' => (int) ($match['group_id'] ?? 0),
-                    'team_a_id' => $teamAId,
-                    'team_b_id' => $teamBId,
-                    'court_number' => $court,
-                    'schedule_order' => $order,
-                    'planned_start' => $plannedStart->format('Y-m-d H:i:s'),
-                ];
-
-                $order++;
-                $assignedInSlot++;
-                $teamsUsedInSlot[$teamAId] = true;
-                $teamsUsedInSlot[$teamBId] = true;
-                $lastSlotByTeam[$teamAId] = $slotIndex;
-                $lastSlotByTeam[$teamBId] = $slotIndex;
-            }
-
-            if ($assignedInSlot === 0 && count($pending) > 0) {
-                $match = array_shift($pending);
-                if (is_array($match)) {
-                    $teamAId = (int) ($match['team_a_id'] ?? 0);
-                    $teamBId = (int) ($match['team_b_id'] ?? 0);
-
-                    $schedule[] = [
-                        'group_id' => (int) ($match['group_id'] ?? 0),
-                        'team_a_id' => $teamAId,
-                        'team_b_id' => $teamBId,
-                        'court_number' => 1,
-                        'schedule_order' => $order,
-                        'planned_start' => $plannedStart->format('Y-m-d H:i:s'),
-                    ];
-
-                    $order++;
-                    $lastSlotByTeam[$teamAId] = $slotIndex;
-                    $lastSlotByTeam[$teamBId] = $slotIndex;
-                }
-            }
-
-            $slotIndex++;
+        $normalized = ltrim($value, '0');
+        if ($normalized === '') {
+            $normalized = '0';
+        }
+        $maximumString = (string) $maximum;
+        if (
+            strlen($normalized) > strlen($maximumString)
+            || (strlen($normalized) === strlen($maximumString) && strcmp($normalized, $maximumString) > 0)
+        ) {
+            return null;
         }
 
-        return $schedule;
+        $integer = (int) $normalized;
+        return $integer >= $minimum && $integer <= $maximum ? $integer : null;
     }
 
-    /**
-     * @param list<array{group_id: int, team_a_id: int, team_b_id: int}> $pending
-     * @param array<int, bool> $teamsUsedInSlot
-     * @param array<int, int> $lastSlotByTeam
-     */
-    private function pickBestMatchIndex(
-        array $pending,
-        array $teamsUsedInSlot,
-        array $lastSlotByTeam,
-        int $slotIndex
-    ): ?int {
-        $bestIndex = null;
-        $bestScore = null;
-
-        foreach ($pending as $index => $match) {
-            $teamAId = (int) ($match['team_a_id'] ?? 0);
-            $teamBId = (int) ($match['team_b_id'] ?? 0);
-
-            if ($teamAId <= 0 || $teamBId <= 0) {
-                continue;
-            }
-
-            if (isset($teamsUsedInSlot[$teamAId]) || isset($teamsUsedInSlot[$teamBId])) {
-                continue;
-            }
-
-            $gapA = isset($lastSlotByTeam[$teamAId]) ? $slotIndex - $lastSlotByTeam[$teamAId] : 1000;
-            $gapB = isset($lastSlotByTeam[$teamBId]) ? $slotIndex - $lastSlotByTeam[$teamBId] : 1000;
-            $minGap = min($gapA, $gapB);
-            $score = ($minGap * 1000) + $gapA + $gapB;
-
-            if ($bestScore === null || $score > $bestScore) {
-                $bestScore = $score;
-                $bestIndex = $index;
-            }
+    private function isValidCalendarDate(string $value): bool
+    {
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $matches) !== 1) {
+            return false;
         }
 
-        return $bestIndex;
+        $year = (int) ($matches[1] ?? 0);
+        $month = (int) ($matches[2] ?? 0);
+        $day = (int) ($matches[3] ?? 0);
+        return $year >= 1000 && $year <= 9999 && checkdate($month, $day, $year);
     }
 
-    private function plannedStartAtSlot(
-        DateTimeImmutable $startDateTime,
-        int $slotIndex,
-        int $matchDurationMinutes
-    ): DateTimeImmutable {
-        $minutesToAdd = max(0, $slotIndex) * max(1, $matchDurationMinutes);
-        return $startDateTime->add(new DateInterval('PT' . $minutesToAdd . 'M'));
+    private function stringLength(string $value): int
+    {
+        return function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
     }
 
     private function normalizeSection(string $section): string

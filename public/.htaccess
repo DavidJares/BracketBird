@@ -1,5 +1,9 @@
-RewriteEngine On
 Options -Indexes
+RewriteEngine On
+
+# Keep this file limited to directives accepted by standard shared hosting.
+RewriteRule (^|/)\. - [F,L,NC]
+RewriteRule (?:\.(?:bak|conf|crt|env|gz|ini|key|lock|log|old|orig|pem|save|sql|sqlite|swp|tar|ya?ml|zip)|~)$ - [F,L,NC]
 
 # Serve existing files/directories directly.
 RewriteCond %{REQUEST_FILENAME} -f [OR]

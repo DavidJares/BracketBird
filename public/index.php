@@ -12,18 +12,112 @@ use App\Controllers\TournamentController;
 use App\Controllers\PublicViewController;
 use App\Router;
 
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
+error_reporting(E_ALL);
+header_remove('X-Powered-By');
+
+set_exception_handler(static function (Throwable $throwable): void {
+    error_log(sprintf(
+        'Unhandled %s in %s:%d',
+        $throwable::class,
+        $throwable->getFile(),
+        $throwable->getLine()
+    ));
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header_remove('X-Powered-By');
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+        header('Referrer-Policy: no-referrer');
+        header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+    }
+
+echo "500 Internal Server Error\n";
+});
+
 $services = require __DIR__ . '/../src/bootstrap.php';
-$isHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
-    || ((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+$httpsValue = strtolower(trim((string) ($_SERVER['HTTPS'] ?? '')));
+$isHttps = ($httpsValue !== '' && $httpsValue !== 'off' && $httpsValue !== '0')
+    || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443;
+
+$configuredUrl = $services['config']['app']['url'] ?? null;
+if (is_string($configuredUrl) && trim($configuredUrl) !== '') {
+    $configuredScheme = parse_url(trim($configuredUrl), PHP_URL_SCHEME);
+    $isHttps = $isHttps || (is_string($configuredScheme) && strtolower($configuredScheme) === 'https');
+}
+
+$trustProxyValue = $services['config']['app']['trust_proxy'] ?? false;
+$trustProxy = is_bool($trustProxyValue)
+    ? $trustProxyValue
+    : filter_var($trustProxyValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true;
+
+if ($trustProxy) {
+    $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+    if ($forwardedProto !== '') {
+        $_SERVER['HTTP_X_FORWARDED_PROTO'] = $forwardedProto;
+        $isHttps = $isHttps || $forwardedProto === 'https';
+    } else {
+        unset($_SERVER['HTTP_X_FORWARDED_PROTO']);
+    }
+} else {
+    unset($_SERVER['HTTP_X_FORWARDED_PROTO']);
+}
+
+if ($isHttps) {
+    $_SERVER['HTTPS'] = 'on';
+}
+
+$configuredBasePath = null;
+$rawBasePath = $services['config']['app']['base_path'] ?? null;
+if (is_string($rawBasePath)) {
+    $rawBasePath = trim($rawBasePath);
+    if ($rawBasePath === '') {
+        $configuredBasePath = '';
+    } else {
+        $configuredBasePath = '/' . trim($rawBasePath, '/');
+        if ($configuredBasePath === '/') {
+            $configuredBasePath = '';
+        }
+    }
+}
+
+$scriptDirectory = '';
+if ($configuredBasePath !== null) {
+    $scriptDirectory = $configuredBasePath;
+} else {
+    $scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+    $scriptDirectory = str_replace('\\', '/', dirname($scriptName));
+    $scriptDirectory = $scriptDirectory === '/' || $scriptDirectory === '.'
+        ? ''
+        : rtrim($scriptDirectory, '/');
+}
+
+$sessionCookiePath = $scriptDirectory !== '' ? $scriptDirectory : '/';
+$sessionName = $scriptDirectory === ''
+    ? 'BRACKETBIRDSESSID'
+    : 'BRACKETBIRD' . strtoupper(substr(hash('sha256', $scriptDirectory), 0, 12));
+
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+ini_set('session.use_trans_sid', '0');
+session_name($sessionName);
+session_cache_limiter('');
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => '/',
+    'path' => $sessionCookiePath,
     'domain' => '',
     'secure' => $isHttps,
     'httponly' => true,
     'samesite' => 'Lax',
 ]);
-session_start();
+if (!session_start()) {
+    throw new RuntimeException('Unable to start the application session.');
+}
 
 $appEnv = strtolower((string) ($services['config']['app']['env'] ?? 'prod'));
 $displayErrors = $appEnv === 'dev' || $appEnv === 'local';
@@ -35,6 +129,7 @@ error_reporting(E_ALL);
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('X-Frame-Options: SAMEORIGIN');
+header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()');
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://api.qrserver.com; frame-src https://www.google.com https://www.google.com/maps; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
 
 $router = new Router();
@@ -46,6 +141,7 @@ $adminDashboardController = new AdminDashboardController($services);
 $tournamentAdminAuthController = new TournamentAdminAuthController($services);
 $tournamentController = new TournamentController($services);
 $publicViewController = new PublicViewController($services);
+$router->setNotFoundHandler([$homeController, 'notFound']);
 
 $router->get('/', [$homeController, 'index']);
 $router->get('/setup', [$setupController, 'index']);
@@ -119,32 +215,13 @@ $router->get('/public/{slug}/display', [$publicViewController, 'display']);
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestUriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
-$configuredBasePath = null;
-$rawBasePath = $services['config']['app']['base_path'] ?? null;
-if (is_string($rawBasePath)) {
-    $rawBasePath = trim($rawBasePath);
-    if ($rawBasePath === '') {
-        $configuredBasePath = '';
-    } else {
-        $configuredBasePath = '/' . trim($rawBasePath, '/');
-        if ($configuredBasePath === '/') {
-            $configuredBasePath = '';
-        }
-    }
-}
-
-$scriptDirectory = '';
-if ($configuredBasePath !== null) {
-    $scriptDirectory = $configuredBasePath;
-} else {
-    $scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
-    $scriptDirectory = str_replace('\\', '/', dirname($scriptName));
-    $scriptDirectory = $scriptDirectory === '/' || $scriptDirectory === '.' ? '' : rtrim($scriptDirectory, '/');
-}
 
 $path = is_string($requestUriPath) && $requestUriPath !== '' ? $requestUriPath : '/';
 
-if ($scriptDirectory !== '' && strncmp($path, $scriptDirectory, strlen($scriptDirectory)) === 0) {
+if (
+    $scriptDirectory !== ''
+    && ($path === $scriptDirectory || str_starts_with($path, $scriptDirectory . '/'))
+) {
     $path = substr($path, strlen($scriptDirectory));
     if (!is_string($path) || $path === '') {
         $path = '/';
@@ -161,6 +238,21 @@ if (!is_string($path) || $path === '') {
     $path = '/';
 }
 
+$requiresNoStore = $path === '/setup'
+    || str_starts_with($path, '/setup/')
+    || $path === '/language'
+    || str_starts_with($path, '/language/')
+    || $path === '/admin'
+    || str_starts_with($path, '/admin/')
+    || $path === '/tournament'
+    || str_starts_with($path, '/tournament/');
+
+if ($requiresNoStore) {
+    header('Cache-Control: no-store, max-age=0');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+}
+
 if (strtoupper($method) === 'POST') {
     $sessionToken = $_SESSION['_csrf_token'] ?? '';
     $postedToken = $_POST['_csrf_token'] ?? '';
@@ -171,10 +263,7 @@ if (strtoupper($method) === 'POST') {
         || $postedToken === ''
         || !hash_equals($sessionToken, $postedToken)
     ) {
-        http_response_code(403);
-        header('Content-Type: text/html; charset=utf-8');
-        echo '403 Forbidden';
-        exit;
+        $homeController->forbidden();
     }
 }
 

@@ -6,6 +6,8 @@ namespace App;
 
 final class Router
 {
+    private $notFoundHandler = null;
+
     /**
      * @var array<string, array<string, callable>>
      */
@@ -50,6 +52,11 @@ final class Router
         ];
     }
 
+    public function setNotFoundHandler(callable $handler): void
+    {
+        $this->notFoundHandler = $handler;
+    }
+
     public function dispatch(string $method, string $path): void
     {
         $normalizedPath = $this->normalizePath($path);
@@ -82,6 +89,11 @@ final class Router
         }
 
         if ($handler === null) {
+            if (is_callable($this->notFoundHandler)) {
+                ($this->notFoundHandler)();
+                return;
+            }
+
             http_response_code(404);
             header('Content-Type: text/html; charset=utf-8');
             echo '404 Not Found';

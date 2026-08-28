@@ -12,11 +12,13 @@ declare(strict_types=1);
 /** @var string|null $resetActionUrl */
 /** @var string|null $matchStage */
 /** @var bool|null $requiresDependentResetConfirmation */
+/** @var bool|null $requiresKnockoutResetConfirmation */
 
 $tournamentId = (int) ($tournament['id'] ?? 0);
 $matchStage = is_string($matchStage ?? null) ? $matchStage : 'group';
 $isKnockoutStage = $matchStage === 'knockout';
 $requiresDependentResetConfirmation = (bool) ($requiresDependentResetConfirmation ?? false);
+$requiresKnockoutResetConfirmation = (bool) ($requiresKnockoutResetConfirmation ?? false);
 $status = (string) ($match['status'] ?? 'pending');
 $statusLabel = $t('match_status.' . ($status !== '' ? $status : 'pending'));
 $matchMode = (string) ($match['match_mode'] ?? ($tournament['group_stage_mode'] ?? ($tournament['match_mode'] ?? '')));
@@ -84,8 +86,12 @@ if ($winnerTeamId <= 0 && $status === 'finished') {
         $winnerTeamId = $teamBId;
     }
 }
-$teamAWon = $winnerTeamId > 0 && $teamAId > 0 && $winnerTeamId === $teamAId;
-$teamBWon = $winnerTeamId > 0 && $teamBId > 0 && $winnerTeamId === $teamBId;
+$isFixedGroupDraw = !$isKnockoutStage
+    && $matchMode === 'fixed_2_sets'
+    && $status === 'finished'
+    && $setsSummaryA === $setsSummaryB;
+$teamAWon = !$isFixedGroupDraw && $winnerTeamId > 0 && $teamAId > 0 && $winnerTeamId === $teamAId;
+$teamBWon = !$isFixedGroupDraw && $winnerTeamId > 0 && $teamBId > 0 && $winnerTeamId === $teamBId;
 $resultDisplay = $status === 'finished' ? ($setsSummaryA . ' : ' . $setsSummaryB) : 'vs';
 $setSummaryDisplay = $setSummaryParts !== [] ? implode(' / ', $setSummaryParts) : $t('match_detail.no_set_scores_yet');
 
@@ -103,7 +109,7 @@ $subtitleParts = [
     <header class="bb-workspace-header bb-match-detail-header">
         <div>
             <span class="bb-section-kicker"><?= $isKnockoutStage ? $e('match_detail.knockout_scorekeeping') : $e('match_detail.group_scorekeeping') ?></span>
-            <h2><?= $isKnockoutStage ? $e('match_detail.knockout_match_detail') : $e('match_detail.group_match_detail') ?></h2>
+            <h1><?= $isKnockoutStage ? $e('match_detail.knockout_match_detail') : $e('match_detail.group_match_detail') ?></h1>
             <p><?= htmlspecialchars(implode(' | ', $subtitleParts), ENT_QUOTES, 'UTF-8') ?></p>
         </div>
         <a href="<?= htmlspecialchars($backToMatchesUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-secondary btn-sm"><?= $e('match_detail.back_to_matches') ?></a>
@@ -156,6 +162,7 @@ $subtitleParts = [
                             <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                             <input type="hidden" name="group_id" value="<?= (int) ($filters['group_id'] ?? 0) ?>">
                             <input type="hidden" name="court" value="<?= (int) ($filters['court'] ?? 0) ?>">
+                            <input type="hidden" name="lock_version" value="<?= (int) ($match['lock_version'] ?? 0) ?>">
                             <button type="submit" class="btn btn-primary w-100"><?= $e('match_detail.start_match') ?></button>
                         </form>
                     <?php else: ?>
@@ -178,6 +185,13 @@ $subtitleParts = [
                             <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                             <input type="hidden" name="group_id" value="<?= (int) ($filters['group_id'] ?? 0) ?>">
                             <input type="hidden" name="court" value="<?= (int) ($filters['court'] ?? 0) ?>">
+                            <input type="hidden" name="lock_version" value="<?= (int) ($match['lock_version'] ?? 0) ?>">
+                            <?php if ($requiresKnockoutResetConfirmation): ?>
+                                <label class="form-check small text-warning mb-2">
+                                    <input class="form-check-input" type="checkbox" name="confirm_reset_knockout" value="1" required>
+                                    <span class="form-check-label"><?= $e('match_detail.confirm_remove_knockout') ?></span>
+                                </label>
+                            <?php endif; ?>
                             <button type="submit" class="btn btn-outline-danger w-100"><?= $e('match_detail.reset_result') ?></button>
                         </form>
                     <?php endif; ?>
@@ -202,18 +216,23 @@ $subtitleParts = [
             </div>
 
             <?php if ($scoreEntryAllowed): ?>
+                <div class="bb-score-fast-note" id="score-entry-help">
+                    <strong><?= $e('match_detail.fast_entry') ?></strong>
+                    <span><?= $e('match_detail.fast_entry_help') ?></span>
+                </div>
                 <form
                     method="post"
                     action="<?= htmlspecialchars($scoreActionUrl, ENT_QUOTES, 'UTF-8') ?>"
                     class="bb-score-form"
-                    <?= $requiresDependentResetConfirmation ? 'onsubmit="if(!confirm(' . htmlspecialchars(json_encode($t('match_detail.dependent_reset_confirm')), ENT_QUOTES, 'UTF-8') . ')){return false;} var input=this.querySelector(\'input[name=confirm_reset_dependents]\'); if(input){input.value=\'1\';}"' : '' ?>
+                    autocomplete="off"
+                    aria-describedby="score-entry-help score-result-impact"
                 >
                     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
                     <?php if (!$isKnockoutStage): ?>
                         <input type="hidden" name="group_id" value="<?= (int) ($filters['group_id'] ?? 0) ?>">
                         <input type="hidden" name="court" value="<?= (int) ($filters['court'] ?? 0) ?>">
                     <?php endif; ?>
-                    <input type="hidden" name="confirm_reset_dependents" value="0">
+                    <input type="hidden" name="lock_version" value="<?= (int) ($match['lock_version'] ?? 0) ?>">
 
                     <div class="bb-score-entry-head" aria-hidden="true">
                         <span><?= $e('print.set') ?></span>
@@ -233,6 +252,8 @@ $subtitleParts = [
                                     <span><?= htmlspecialchars($teamAName, ENT_QUOTES, 'UTF-8') ?></span>
                                     <input
                                         type="number"
+                                        inputmode="numeric"
+                                        enterkeyhint="next"
                                         min="0"
                                         max="99"
                                         class="form-control bb-score-input"
@@ -240,12 +261,15 @@ $subtitleParts = [
                                         name="set_<?= $set ?>_a"
                                         value="<?= htmlspecialchars(isset($setValues[$set]) ? (string) $setValues[$set]['score_a'] : '', ENT_QUOTES, 'UTF-8') ?>"
                                         <?= $isRequired ? 'required' : '' ?>
+                                        <?= $set === 1 && $status !== 'finished' ? 'autofocus' : '' ?>
                                     >
                                 </label>
                                 <label class="bb-score-input-wrap" for="set-<?= $set ?>-b">
                                     <span><?= htmlspecialchars($teamBName, ENT_QUOTES, 'UTF-8') ?></span>
                                     <input
                                         type="number"
+                                        inputmode="numeric"
+                                        enterkeyhint="<?= $set === $maxSetNumber ? 'done' : 'next' ?>"
                                         min="0"
                                         max="99"
                                         class="form-control bb-score-input"
@@ -262,16 +286,32 @@ $subtitleParts = [
                     <div class="bb-score-help">
                         <?php if ($matchMode === 'best_of_3'): ?>
                             <p><?= $e('match_detail.best_of_3_help') ?></p>
+                        <?php elseif ($isKnockoutStage): ?>
+                            <p><?= $e('match_detail.fixed_2_knockout_help') ?></p>
+                        <?php else: ?>
+                            <p><?= $e('match_detail.fixed_2_group_help') ?></p>
                         <?php endif; ?>
                         <?php if ($status === 'finished'): ?>
                             <p><?= $e('match_detail.finished_save_corrects') ?></p>
                         <?php endif; ?>
                         <?php if ($requiresDependentResetConfirmation): ?>
                             <p class="text-warning"><?= $e('match_detail.dependent_reset_warning') ?></p>
+                            <label class="form-check text-warning">
+                                <input class="form-check-input" type="checkbox" name="confirm_reset_dependents" value="1">
+                                <span class="form-check-label"><?= $e('match_detail.confirm_reset_dependents') ?></span>
+                            </label>
+                        <?php endif; ?>
+                        <?php if ($requiresKnockoutResetConfirmation): ?>
+                            <p class="text-warning"><?= $e('match_detail.group_change_removes_knockout') ?></p>
+                            <label class="form-check text-warning">
+                                <input class="form-check-input" type="checkbox" name="confirm_reset_knockout" value="1">
+                                <span class="form-check-label"><?= $e('match_detail.confirm_remove_knockout') ?></span>
+                            </label>
                         <?php endif; ?>
                     </div>
 
                     <div class="bb-score-submit">
+                        <p id="score-result-impact"><?= $e('match_detail.result_saved_notice') ?></p>
                         <button type="submit" class="btn btn-success"><?= $e('match_detail.save_result_finish') ?></button>
                     </div>
                 </form>
@@ -283,3 +323,27 @@ $subtitleParts = [
         </section>
     </div>
 </section>
+
+<script>
+    (function () {
+        var scoreForm = document.querySelector('.bb-score-form');
+        if (!scoreForm) {
+            return;
+        }
+
+        var scoreInputs = Array.prototype.slice.call(scoreForm.querySelectorAll('.bb-score-input'));
+        scoreInputs.forEach(function (input, index) {
+            input.addEventListener('focus', function () {
+                input.select();
+            });
+            input.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter' || index >= scoreInputs.length - 1) {
+                    return;
+                }
+
+                event.preventDefault();
+                scoreInputs[index + 1].focus();
+            });
+        });
+    })();
+</script>

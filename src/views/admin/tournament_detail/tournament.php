@@ -5,8 +5,11 @@ declare(strict_types=1);
 /** @var array<string, mixed> $tournament */
 /** @var list<string> $matchModes */
 /** @var string $settingsActionUrl */
+/** @var bool $hasAnyMatches */
 
 $tournamentId = (int) ($tournament['id'] ?? 0);
+$stateVersion = max(0, (int) ($tournament['state_version'] ?? 0));
+$hasAnyMatches = (bool) ($hasAnyMatches ?? false);
 $startTimeValueRaw = (string) ($tournament['start_time'] ?? '');
 $startTimeValue = '';
 if (preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $startTimeValueRaw) === 1) {
@@ -18,15 +21,44 @@ $modeLabels = [
 ];
 $currentSlug = (string) ($tournament['slug'] ?? '');
 $currentName = (string) ($tournament['name'] ?? '');
-$isHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
-    || ((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-$scheme = $isHttps ? 'https' : 'http';
-$host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$loginPath = $url('/tournament/' . $currentSlug . '/login');
-$currentLoginUrl = $scheme . '://' . $host . $loginPath;
+$tournamentLoginUrlPrefix = $absoluteUrl('/tournament/');
+$currentLoginUrl = $absoluteUrl('/tournament/' . $currentSlug . '/login');
 ?>
+<section class="bb-readiness-panel" aria-labelledby="readiness-title">
+    <div class="bb-readiness-heading">
+        <div>
+            <span class="bb-section-kicker"><?= $e('tournament_overview.readiness') ?></span>
+            <h2 id="readiness-title"><?= $e('tournament_overview.readiness') ?></h2>
+        </div>
+        <p><?= $e('tournament_overview.readiness_help') ?></p>
+    </div>
+    <div class="bb-readiness-grid">
+        <a href="<?= htmlspecialchars((string) ($sectionNav['groups'] ?? '#'), ENT_QUOTES, 'UTF-8') ?>" class="bb-readiness-item <?= $totalTeams > 0 ? 'is-complete' : 'is-attention' ?>">
+            <span>01</span>
+            <strong><?= $e('tournament_overview.participants') ?></strong>
+            <small><?= $totalTeams > 0 ? $e('tournament_hub.teams_count', ['count' => $totalTeams]) : $e('tournament_overview.no_participants') ?></small>
+        </a>
+        <a href="<?= htmlspecialchars((string) ($sectionNav['groups'] ?? '#'), ENT_QUOTES, 'UTF-8') ?>" class="bb-readiness-item <?= $groupsReady ? 'is-complete' : 'is-attention' ?>">
+            <span>02</span>
+            <strong><?= $e('tournament_overview.assignment') ?></strong>
+            <small><?= $groupsReady ? $e('tournament_overview.all_assigned') : $e('tournament_overview.needs_assignment', ['count' => $unassignedTeams]) ?></small>
+        </a>
+        <a href="<?= htmlspecialchars((string) ($sectionNav['matches'] ?? '#'), ENT_QUOTES, 'UTF-8') ?>" class="bb-readiness-item <?= $groupMatchTotal > 0 ? 'is-complete' : 'is-attention' ?>">
+            <span>03</span>
+            <strong><?= $e('tournament_overview.group_schedule') ?></strong>
+            <small><?= $groupMatchTotal > 0 ? $e('tournament_overview.matches_generated', ['count' => $groupMatchTotal]) : $e('tournament_overview.no_matches') ?></small>
+        </a>
+        <a href="<?= htmlspecialchars((string) ($sectionNav['public_view'] ?? '#'), ENT_QUOTES, 'UTF-8') ?>" class="bb-readiness-item <?= $publicViewEnabled ? 'is-complete' : 'is-attention' ?>">
+            <span>04</span>
+            <strong><?= $e('tournament_overview.public_display') ?></strong>
+            <small><?= $publicViewEnabled ? $e('tournament_hub.public_live') : $e('tournament_hub.public_private') ?> · <?= $e('tournament_overview.courts', ['count' => (int) ($tournament['number_of_courts'] ?? 0)]) ?></small>
+        </a>
+    </div>
+</section>
+
 <form method="post" action="<?= htmlspecialchars($settingsActionUrl, ENT_QUOTES, 'UTF-8') ?>" class="bb-settings-form">
     <input type="hidden" name="tournament_id" value="<?= $tournamentId ?>">
+    <input type="hidden" name="state_version" value="<?= $stateVersion ?>">
     <input type="hidden" name="return_section" value="tournament">
 
     <div class="bb-settings-header">
@@ -125,7 +157,7 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                 <div class="bb-settings-fields bb-settings-fields-compact">
                     <div class="bb-field">
                         <label for="number_of_groups" class="form-label"><?= $e('tournament.groups') ?></label>
-                        <input type="number" class="form-control" name="number_of_groups" id="number_of_groups" min="1" max="52" value="<?= (int) ($tournament['number_of_groups'] ?? 1) ?>" required>
+                        <input type="number" class="form-control" name="number_of_groups" id="number_of_groups" min="1" max="32" value="<?= (int) ($tournament['number_of_groups'] ?? 1) ?>" required>
                     </div>
                     <div class="bb-field">
                         <label for="number_of_courts" class="form-label"><?= $e('tournament.courts') ?></label>
@@ -149,9 +181,18 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                                 aria-label="<?= $e('tournament.advancing_teams_help_label') ?>"
                             >i</span>
                         </label>
-                        <input type="number" class="form-control" name="advancing_teams_count" id="advancing_teams_count" min="1" max="64" value="<?= (int) ($tournament['advancing_teams_count'] ?? 2) ?>" required>
+                        <input type="number" class="form-control" name="advancing_teams_count" id="advancing_teams_count" min="2" max="64" value="<?= (int) ($tournament['advancing_teams_count'] ?? 2) ?>" required>
                     </div>
                 </div>
+                <?php if ($hasAnyMatches): ?>
+                    <div class="alert alert-warning mt-3 mb-0" role="alert">
+                        <p class="mb-2"><?= $e('tournament.structure_change_warning') ?></p>
+                        <label class="form-check">
+                            <input class="form-check-input" type="checkbox" name="confirm_reset_matches" value="1">
+                            <span class="form-check-label"><?= $e('tournament.confirm_reset_matches') ?></span>
+                        </label>
+                    </div>
+                <?php endif; ?>
             </section>
         </div>
 
@@ -202,7 +243,7 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
                 <div class="bb-settings-fields bb-settings-fields-single">
                     <div class="bb-field">
                         <label for="admin_password" class="form-label"><?= $e('tournament.admin_password') ?></label>
-                        <input type="password" name="admin_password" id="admin_password" class="form-control" minlength="8" placeholder="<?= $e('tournament.leave_blank_keep_unchanged') ?>">
+                        <input type="password" name="admin_password" id="admin_password" class="form-control" minlength="8" maxlength="72" placeholder="<?= $e('tournament.leave_blank_keep_unchanged') ?>">
                         <div class="form-text"><?= $e('tournament.leave_blank_keep_current_password') ?></div>
                     </div>
                 </div>
@@ -229,7 +270,7 @@ $currentLoginUrl = $scheme . '://' . $host . $loginPath;
         var fallbackAction = document.getElementById('slug_update_action_fallback');
         var loginUrlInput = document.getElementById('tournament_login_url');
         var loginUrlOpen = document.getElementById('tournament_login_url_open');
-        var loginUrlPrefix = <?= json_encode($scheme . '://' . $host . $url('/tournament/'), JSON_UNESCAPED_SLASHES) ?>;
+        var loginUrlPrefix = <?= json_encode($tournamentLoginUrlPrefix, JSON_UNESCAPED_SLASHES) ?>;
         var loginUrlSuffix = '/login';
         var currentSlug = slugInput ? (slugInput.value || '').trim() : '';
         var originalName = nameInput ? (nameInput.getAttribute('data-original-name') || '').trim() : '';
